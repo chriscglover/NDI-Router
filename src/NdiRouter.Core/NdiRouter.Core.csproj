@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The router: NDI routing, SW-P-08 server, TSL output and settings.
+       No UI code here, so it can be tested on its own and driven by the Avalonia GUI. -->
+
+  <PropertyGroup>
+    <RootNamespace>NdiRouter</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="NdiRouter.Tests" />
+    <InternalsVisibleTo Include="NdiRouter.Gui.Tests" />
+  </ItemGroup>
+
+</Project>

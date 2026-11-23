@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/NdiRouter.Core/NdiRouter.Core.csproj" />
+    <Project Path="src/NdiRouter/NdiRouter.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/NdiRouter.Gui.Tests/NdiRouter.Gui.Tests.csproj" />
+    <Project Path="tests/NdiRouter.Tests/NdiRouter.Tests.csproj" />
+  </Folder>
+</Solution>

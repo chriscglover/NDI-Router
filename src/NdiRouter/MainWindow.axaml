@@ -1,0 +1,418 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:NdiRouter.Gui.ViewModels"
+        xmlns:tsl="using:NdiRouter.Tsl"
+        x:Class="NdiRouter.Gui.MainWindow"
+        x:DataType="vm:MainViewModel"
+        Title="{Binding Title}"
+        Icon="/Assets/NdiRouter.ico"
+        Width="1380" Height="900" MinWidth="1000" MinHeight="640"
+        WindowStartupLocation="CenterScreen">
+
+  <Window.Resources>
+    <!-- One router panel button -->
+    <DataTemplate x:Key="Tile" x:DataType="vm:TileViewModel">
+      <Panel Classes="tile" Width="156" Height="78" Margin="0,0,8,8" Background="Transparent">
+        <Border Background="{Binding Background}" BorderBrush="{Binding BorderBrush}"
+                BorderThickness="{Binding BorderThickness}" CornerRadius="6" />
+        <Rectangle IsVisible="{Binding IsMixed}" Stroke="#D93A3A" StrokeThickness="2" StrokeDashArray="3,2"
+                   RadiusX="6" RadiusY="6" />
+        <Border Classes="hover" Background="#18FFFFFF" CornerRadius="6" IsHitTestVisible="False" />
+        <Grid RowDefinitions="Auto,*,Auto" Margin="9,5">
+          <TextBlock Text="{Binding Number}" FontSize="10" Foreground="{Binding SubForeground}" />
+          <TextBlock Grid.Row="1" Text="{Binding Title}" Foreground="{Binding Foreground}"
+                     FontSize="{Binding FontSize}" FontWeight="{Binding FontWeight}" FontStyle="{Binding FontStyle}"
+                     TextDecorations="{Binding TextDecorations}"
+                     HorizontalAlignment="Center" VerticalAlignment="Center" TextAlignment="Center"
+                     TextWrapping="Wrap" MaxLines="2" TextTrimming="CharacterEllipsis" />
+          <TextBlock Grid.Row="2" Text="{Binding Subtitle}" FontSize="10.5" Foreground="{Binding SubForeground}"
+                     HorizontalAlignment="Center" TextTrimming="CharacterEllipsis" />
+        </Grid>
+      </Panel>
+    </DataTemplate>
+  </Window.Resources>
+
+  <DockPanel>
+
+    <!-- Title and status -->
+    <Border DockPanel.Dock="Top" Padding="16,10"
+            Background="{DynamicResource SystemControlBackgroundChromeMediumLowBrush}">
+      <Grid ColumnDefinitions="Auto,*,Auto">
+        <StackPanel Orientation="Horizontal" Spacing="22" VerticalAlignment="Center">
+          <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+            <TextBlock Text="NDI Router" FontSize="18" FontWeight="SemiBold" VerticalAlignment="Center" />
+            <TextBlock Text="{Binding Version}" Classes="hint" VerticalAlignment="Bottom" Margin="0,0,0,2" />
+          </StackPanel>
+          <StackPanel Orientation="Horizontal" Spacing="7" VerticalAlignment="Center">
+            <Ellipse Width="10" Height="10" Fill="{Binding NdiBrush}" />
+            <TextBlock Text="{Binding NdiStatus}" />
+          </StackPanel>
+          <StackPanel Orientation="Horizontal" Spacing="7" VerticalAlignment="Center">
+            <Ellipse Width="10" Height="10" Fill="{Binding Swp08Brush}" />
+            <TextBlock Text="{Binding Swp08Status}" />
+          </StackPanel>
+          <StackPanel Orientation="Horizontal" Spacing="7" VerticalAlignment="Center">
+            <Ellipse Width="10" Height="10" Fill="{Binding TslBrush}" />
+            <TextBlock Text="{Binding TslStatus}" />
+          </StackPanel>
+        </StackPanel>
+        <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8">
+          <Button Content="Import from NDI Router..." Command="{Binding ImportNdiRouterCommand}"
+                  ToolTip.Tip="Bring across NDI Router's inputs, outputs, routes and preset names" />
+          <Button Content="Save" Command="{Binding SaveCommand}"
+                  ToolTip.Tip="Settings and routes are also saved automatically as they change" />
+        </StackPanel>
+      </Grid>
+    </Border>
+
+    <Grid RowDefinitions="*,4,170" Margin="10,6,10,10">
+
+      <TabControl Grid.Row="0" Padding="0,6,0,0">
+
+        <!-- ============================================================ Router panel -->
+        <TabItem Header="Router">
+          <ScrollViewer>
+            <StackPanel Margin="4,4,4,0">
+              <StackPanel Orientation="Horizontal" Spacing="12" Margin="0,4,0,8">
+                <TextBlock Text="OUTPUTS" Classes="heading" Margin="0" VerticalAlignment="Center" />
+                <Button Content="Clear output" Command="{Binding ClearSelectedCommand}" Padding="12,3"
+                        ToolTip.Tip="Take the selected outputs off any source" />
+                <TextBlock Text="{Binding PanelHint}" Classes="hint" VerticalAlignment="Center" />
+              </StackPanel>
+              <ItemsControl x:Name="OutputTiles" ItemsSource="{Binding OutputTiles}" ItemTemplate="{StaticResource Tile}">
+                <ItemsControl.ItemsPanel>
+                  <ItemsPanelTemplate>
+                    <WrapPanel />
+                  </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+              </ItemsControl>
+
+              <TextBlock Text="INPUTS" Classes="heading" Margin="0,10,0,8" />
+              <ItemsControl x:Name="InputTiles" ItemsSource="{Binding InputTiles}" ItemTemplate="{StaticResource Tile}">
+                <ItemsControl.ItemsPanel>
+                  <ItemsPanelTemplate>
+                    <WrapPanel />
+                  </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+              </ItemsControl>
+
+              <StackPanel Orientation="Horizontal" Spacing="12" Margin="0,10,0,8">
+                <TextBlock Text="PRESETS" Classes="heading" Margin="0" VerticalAlignment="Center" />
+                <ToggleButton Content="Store preset" IsChecked="{Binding StoreArmed}" Padding="12,3"
+                              ToolTip.Tip="Then click a preset to store every output's route in it" />
+              </StackPanel>
+              <ItemsControl x:Name="PresetTiles" ItemsSource="{Binding PresetTiles}" ItemTemplate="{StaticResource Tile}">
+                <ItemsControl.ItemsPanel>
+                  <ItemsPanelTemplate>
+                    <WrapPanel />
+                  </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+              </ItemsControl>
+              <TextBlock Classes="hint" Margin="0,6,0,12"
+                         Text="Right-click any button to set it up: assign an NDI source, rename, SW-P-08 names, style." />
+            </StackPanel>
+          </ScrollViewer>
+        </TabItem>
+
+        <!-- ============================================================ Inputs -->
+        <TabItem Header="Inputs">
+          <DockPanel Margin="4,4,4,0">
+            <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="12" Margin="0,4,0,10">
+              <Button Content="Generate all SW-P-08 names from labels" Command="{Binding GenerateAllNamesCommand}"
+                      CommandParameter="inputs" />
+              <TextBlock Classes="hint" VerticalAlignment="Center" MaxWidth="900"
+                         Text="Input n is SW-P-08 source n-1. Grey names are generated from the label and follow it; type over one to fix it, clear it to go back. Right-click a row for more." />
+            </StackPanel>
+            <Grid DockPanel.Dock="Top" ColumnDefinitions="44,2*,70,110,158,3*,96" Margin="8,0,24,4">
+              <TextBlock Grid.Column="0" Text="In" Classes="hint" />
+              <TextBlock Grid.Column="1" Text="Label" Classes="hint" />
+              <TextBlock Grid.Column="2" Text="4 char" Classes="hint" />
+              <TextBlock Grid.Column="3" Text="8 char" Classes="hint" />
+              <TextBlock Grid.Column="4" Text="12 char" Classes="hint" />
+              <TextBlock Grid.Column="5" Text="NDI source" Classes="hint" />
+              <TextBlock Grid.Column="6" Text="Status" Classes="hint" />
+            </Grid>
+            <ScrollViewer>
+              <ItemsControl ItemsSource="{Binding InputRows}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="vm:InputRowViewModel">
+                    <Grid Classes="row" ColumnDefinitions="44,2*,70,110,158,3*,96" Margin="8,2,8,2" Background="Transparent">
+                      <Grid.ContextMenu>
+                        <ContextMenu>
+                          <MenuItem Header="Generate SW-P-08 names from label" Command="{Binding GenerateNamesCommand}" />
+                        </ContextMenu>
+                      </Grid.ContextMenu>
+                      <TextBlock Grid.Column="0" Text="{Binding Number}" VerticalAlignment="Center" />
+                      <TextBox Grid.Column="1" Text="{Binding Label, UpdateSourceTrigger=LostFocus}" />
+                      <TextBox Grid.Column="2" Text="{Binding Name4, UpdateSourceTrigger=LostFocus}"
+                               Watermark="{Binding Name4Generated}" MaxLength="4" Classes="mono" />
+                      <TextBox Grid.Column="3" Text="{Binding Name8, UpdateSourceTrigger=LostFocus}"
+                               Watermark="{Binding Name8Generated}" MaxLength="8" Classes="mono" />
+                      <TextBox Grid.Column="4" Text="{Binding Name12, UpdateSourceTrigger=LostFocus}"
+                               Watermark="{Binding Name12Generated}" MaxLength="12" Classes="mono" />
+                      <AutoCompleteBox Grid.Column="5" Text="{Binding NdiSource, UpdateSourceTrigger=LostFocus}"
+                                       ItemsSource="{Binding Sources}" FilterMode="Contains" MinimumPrefixLength="0"
+                                       Watermark="Type or pick an NDI source" />
+                      <Border Grid.Column="6" CornerRadius="10" Padding="10,2" HorizontalAlignment="Left"
+                              VerticalAlignment="Center" BorderBrush="{Binding StatusBrush}" BorderThickness="1">
+                        <TextBlock Text="{Binding Status}" Foreground="{Binding StatusBrush}" FontSize="12" />
+                      </Border>
+                    </Grid>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </ScrollViewer>
+          </DockPanel>
+        </TabItem>
+
+        <!-- ============================================================ Outputs -->
+        <TabItem Header="Outputs">
+          <DockPanel Margin="4,4,4,0">
+            <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="12" Margin="0,4,0,10">
+              <Button Content="Generate all SW-P-08 names from labels" Command="{Binding GenerateAllNamesCommand}"
+                      CommandParameter="outputs" />
+              <TextBlock Classes="hint" VerticalAlignment="Center" MaxWidth="900"
+                         Text="Output n is SW-P-08 destination n-1, published on the network under its NDI name. Rx counts the NDI receivers watching it; UMD text is what TSL sends to its address." />
+            </StackPanel>
+            <Grid DockPanel.Dock="Top" ColumnDefinitions="44,2*,70,110,158,2*,2*,44,56,100,2*" Margin="8,0,24,4">
+              <TextBlock Grid.Column="0" Text="Out" Classes="hint" />
+              <TextBlock Grid.Column="1" Text="Label" Classes="hint" />
+              <TextBlock Grid.Column="2" Text="4 char" Classes="hint" />
+              <TextBlock Grid.Column="3" Text="8 char" Classes="hint" />
+              <TextBlock Grid.Column="4" Text="12 char" Classes="hint" />
+              <TextBlock Grid.Column="5" Text="NDI output name" Classes="hint" />
+              <TextBlock Grid.Column="6" Text="Routed from" Classes="hint" />
+              <TextBlock Grid.Column="7" Text="Rx" Classes="hint" />
+              <TextBlock Grid.Column="8" Text="UMD" Classes="hint" />
+              <TextBlock Grid.Column="9" Text="UMD addr" Classes="hint" />
+              <TextBlock Grid.Column="10" Text="UMD text" Classes="hint" />
+            </Grid>
+            <ScrollViewer>
+              <ItemsControl ItemsSource="{Binding OutputRows}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate x:DataType="vm:OutputRowViewModel">
+                    <Grid Classes="row" ColumnDefinitions="44,2*,70,110,158,2*,2*,44,56,100,2*" Margin="8,2,8,2" Background="Transparent">
+                      <Grid.ContextMenu>
+                        <ContextMenu>
+                          <MenuItem Header="Generate SW-P-08 names from label" Command="{Binding GenerateNamesCommand}" />
+                        </ContextMenu>
+                      </Grid.ContextMenu>
+                      <TextBlock Grid.Column="0" Text="{Binding Number}" VerticalAlignment="Center" />
+                      <TextBox Grid.Column="1" Text="{Binding Label, UpdateSourceTrigger=LostFocus}" />
+                      <TextBox Grid.Column="2" Text="{Binding Name4, UpdateSourceTrigger=LostFocus}"
+                               Watermark="{Binding Name4Generated}" MaxLength="4" Classes="mono" />
+                      <TextBox Grid.Column="3" Text="{Binding Name8, UpdateSourceTrigger=LostFocus}"
+                               Watermark="{Binding Name8Generated}" MaxLength="8" Classes="mono" />
+                      <TextBox Grid.Column="4" Text="{Binding Name12, UpdateSourceTrigger=LostFocus}"
+                               Watermark="{Binding Name12Generated}" MaxLength="12" Classes="mono" />
+                      <TextBox Grid.Column="5" Text="{Binding NdiName, UpdateSourceTrigger=LostFocus}" />
+                      <ComboBox Grid.Column="6" ItemsSource="{Binding Choices}" SelectedItem="{Binding Route}"
+                                HorizontalAlignment="Stretch" Margin="0,0,6,0" />
+                      <TextBlock Grid.Column="7" Text="{Binding Receivers}" VerticalAlignment="Center" />
+                      <CheckBox Grid.Column="8" IsChecked="{Binding UmdEnabled}" />
+                      <NumericUpDown Grid.Column="9" Value="{Binding UmdAddress}" Minimum="0" Maximum="65534"
+                                     FormatString="0" Margin="0,0,6,0" ShowButtonSpinner="False" />
+                      <TextBlock Grid.Column="10" Text="{Binding UmdText}" Classes="mono" VerticalAlignment="Center"
+                                 TextTrimming="CharacterEllipsis" />
+                    </Grid>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </ScrollViewer>
+          </DockPanel>
+        </TabItem>
+
+        <!-- ============================================================ SW-P-08 -->
+        <TabItem Header="SW-P-08">
+          <ScrollViewer>
+            <WrapPanel Margin="4,8,4,0">
+              <Border Classes="card" Width="520" DataContext="{Binding Swp08}">
+                <StackPanel x:DataType="vm:Swp08ViewModel" Spacing="8">
+                  <TextBlock Text="SW-P-08 (PRO-BEL) CONTROL" Classes="heading" />
+                  <CheckBox Content="Accept SW-P-08 control" IsChecked="{Binding Enabled}" />
+                  <Grid ColumnDefinitions="180,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto" RowSpacing="8">
+                    <TextBlock Grid.Row="0" Text="Listen on address" Classes="label" />
+                    <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding BindAddress}" Width="180" HorizontalAlignment="Left" />
+                    <TextBlock Grid.Row="1" Text="TCP port" Classes="label" />
+                    <NumericUpDown Grid.Row="1" Grid.Column="1" Value="{Binding Port}" Minimum="1" Maximum="65535" FormatString="0" Width="140" HorizontalAlignment="Left" />
+                    <TextBlock Grid.Row="2" Text="Matrix" Classes="label" />
+                    <NumericUpDown Grid.Row="2" Grid.Column="1" Value="{Binding Matrix}" Minimum="1" Maximum="16" FormatString="0" Width="140" HorizontalAlignment="Left" />
+                    <TextBlock Grid.Row="3" Text="Level" Classes="label" />
+                    <StackPanel Grid.Row="3" Grid.Column="1" Orientation="Horizontal" Spacing="14">
+                      <NumericUpDown Value="{Binding Level}" Minimum="1" Maximum="16" FormatString="0" Width="140" />
+                      <CheckBox Content="Answer on every level" IsChecked="{Binding AnyLevel}" />
+                    </StackPanel>
+                    <TextBlock Grid.Row="4" Text="Clear source number" Classes="label" />
+                    <NumericUpDown Grid.Row="4" Grid.Column="1" Value="{Binding ClearSource}" Minimum="1" Maximum="65536" FormatString="0" Width="140" HorizontalAlignment="Left" />
+                    <TextBlock Grid.Row="5" Text="ACK timeout (ms)" Classes="label" />
+                    <NumericUpDown Grid.Row="5" Grid.Column="1" Value="{Binding AckTimeoutMs}" Minimum="50" Maximum="10000" Increment="100" FormatString="0" Width="140" HorizontalAlignment="Left" />
+                    <TextBlock Grid.Row="6" Text="Send attempts" Classes="label" />
+                    <NumericUpDown Grid.Row="6" Grid.Column="1" Value="{Binding SendAttempts}" Minimum="1" Maximum="10" FormatString="0" Width="140" HorizontalAlignment="Left" />
+                  </Grid>
+                  <CheckBox Content="Send NAMES UPDATED after a name changes" IsChecked="{Binding SendNamesUpdated}" />
+                  <CheckBox Content="Log every message" IsChecked="{Binding LogTraffic}" />
+                  <TextBlock Classes="hint"
+                             Text="Numbers are as a controller shows them (matrix 1 is 0 on the wire). Routing the clear source takes an output off air, and a cleared output reports it. NDI carries video, audio and metadata together, so answering on every level suits controllers that switch several levels at once. A Pro-Bel controller re-sends an unacknowledged message up to 5 times (6 attempts)." />
+                  <TextBlock Text="{Binding Error}" Classes="error"
+                             IsVisible="{Binding Error, Converter={x:Static ObjectConverters.IsNotNull}}" />
+                  <StackPanel Orientation="Horizontal" Spacing="12">
+                    <Button Content="Apply" Command="{Binding ApplyCommand}" Classes="accent" MinWidth="90" />
+                    <TextBlock Text="{Binding State}" VerticalAlignment="Center" />
+                  </StackPanel>
+                </StackPanel>
+              </Border>
+
+              <Border Classes="card" Width="520" DataContext="{Binding Swp08}">
+                <StackPanel x:DataType="vm:Swp08ViewModel" Spacing="8">
+                  <TextBlock Text="CONNECTED CONTROLLERS" Classes="heading" />
+                  <TextBlock Text="No controllers connected." Classes="hint" IsVisible="{Binding !HasClients}" />
+                  <ListBox ItemsSource="{Binding Clients}" Classes="compact mono" FontSize="12.5" IsVisible="{Binding HasClients}" />
+                  <TextBlock Classes="hint"
+                             Text="Each TCP connection is its own SW-P-08 link. Every route change - from any controller, the panel or a preset - is sent to all of them as CONNECTED." />
+                </StackPanel>
+              </Border>
+            </WrapPanel>
+          </ScrollViewer>
+        </TabItem>
+
+        <!-- ============================================================ TSL -->
+        <TabItem Header="TSL UMD">
+          <ScrollViewer DataContext="{Binding Tsl}">
+            <StackPanel Margin="4,8,4,0" x:DataType="vm:TslViewModel">
+              <WrapPanel>
+                <Border Classes="card" Width="440">
+                  <StackPanel Spacing="8">
+                    <TextBlock Text="OUTPUT" Classes="heading" />
+                    <CheckBox Content="Send UMDs" IsChecked="{Binding Enabled}" />
+                    <Grid ColumnDefinitions="150,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto" RowSpacing="8">
+                      <TextBlock Grid.Row="0" Text="Destination" Classes="label" />
+                      <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding Destination}" Watermark="IP address or host name" />
+                      <TextBlock Grid.Row="1" Text="Port" Classes="label" />
+                      <NumericUpDown Grid.Row="1" Grid.Column="1" Value="{Binding Port}" Minimum="1" Maximum="65535" FormatString="0" Width="140" HorizontalAlignment="Left" />
+                      <TextBlock Grid.Row="2" Text="Transport" Classes="label" />
+                      <StackPanel Grid.Row="2" Grid.Column="1" Orientation="Horizontal" Spacing="16">
+                        <RadioButton Content="UDP" GroupName="TslTransport" IsChecked="{Binding UseUdp}" />
+                        <RadioButton Content="TCP" GroupName="TslTransport" IsChecked="{Binding UseTcp}" />
+                      </StackPanel>
+                      <TextBlock Grid.Row="3" Text="Protocol" Classes="label" />
+                      <ComboBox Grid.Row="3" Grid.Column="1" ItemsSource="{Binding Versions}" SelectedIndex="{Binding VersionIndex}" MinWidth="140" />
+                      <TextBlock Grid.Row="4" Text="Screen (5.0)" Classes="label" />
+                      <StackPanel Grid.Row="4" Grid.Column="1" Orientation="Horizontal" Spacing="14">
+                        <NumericUpDown Value="{Binding Screen}" Minimum="0" Maximum="65534" FormatString="0" Width="140" />
+                        <CheckBox Content="All screens" IsChecked="{Binding AllScreens}" />
+                      </StackPanel>
+                      <TextBlock Grid.Row="5" Text="Repeat every (ms)" Classes="label" />
+                      <NumericUpDown Grid.Row="5" Grid.Column="1" Value="{Binding RepeatMs}" Minimum="100" Maximum="60000" Increment="500" FormatString="0" Width="140" HorizontalAlignment="Left" />
+                    </Grid>
+                    <CheckBox Content="TCP stream framing (DLE/STX, TSL 5.0)" IsChecked="{Binding StreamFraming}" />
+                    <CheckBox Content="UTF-16 text (TSL 5.0)" IsChecked="{Binding Unicode}" />
+                    <TextBlock Classes="hint" Text="Each display is refreshed on the repeat interval; a change is sent straight away. Packets are spaced out, never sent in a burst." />
+                  </StackPanel>
+                </Border>
+
+                <Border Classes="card" Width="520">
+                  <StackPanel Spacing="8">
+                    <TextBlock Text="LABEL" Classes="heading" />
+                    <Grid ColumnDefinitions="150,*" RowDefinitions="Auto,Auto,Auto" RowSpacing="8">
+                      <TextBlock Grid.Row="0" Text="Routed" Classes="label" />
+                      <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding RoutedTemplate}" Classes="mono" />
+                      <TextBlock Grid.Row="1" Text="Cleared" Classes="label" />
+                      <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding ClearedTemplate}" Classes="mono" />
+                      <TextBlock Grid.Row="2" Text="Too long (3.1/4.0)" Classes="label" />
+                      <ComboBox Grid.Row="2" Grid.Column="1" ItemsSource="{Binding FitModes}" SelectedIndex="{Binding FitIndex}" MinWidth="200" />
+                    </Grid>
+                    <CheckBox Content="Upper case" IsChecked="{Binding Uppercase}" />
+                    <TextBlock Classes="hint" Text="{Binding TokenHelp}" />
+
+                    <TextBlock Text="TALLY LAMPS" Classes="heading" />
+                    <Grid ColumnDefinitions="150,*" RowDefinitions="Auto,Auto,Auto" RowSpacing="8">
+                      <TextBlock Grid.Row="0" Text="Routed" Classes="label" />
+                      <ComboBox Grid.Row="0" Grid.Column="1" ItemsSource="{Binding Lamps}" SelectedItem="{Binding RoutedLamp}" MinWidth="140" />
+                      <TextBlock Grid.Row="1" Text="Cleared" Classes="label" />
+                      <ComboBox Grid.Row="1" Grid.Column="1" ItemsSource="{Binding Lamps}" SelectedItem="{Binding ClearedLamp}" MinWidth="140" />
+                      <TextBlock Grid.Row="2" Text="Brightness" Classes="label" />
+                      <NumericUpDown Grid.Row="2" Grid.Column="1" Value="{Binding Brightness}" Minimum="0" Maximum="3" FormatString="0" Width="140" HorizontalAlignment="Left" />
+                    </Grid>
+                    <CheckBox Content="Drive the text tally too (4.0, 5.0)" IsChecked="{Binding TextTally}" />
+                  </StackPanel>
+                </Border>
+              </WrapPanel>
+              <Button Content="Apply" Command="{Binding ApplyCommand}" Classes="accent" MinWidth="90" Margin="0,0,0,12" />
+            </StackPanel>
+          </ScrollViewer>
+        </TabItem>
+
+        <!-- ============================================================ Setup -->
+        <TabItem Header="Setup">
+          <ScrollViewer>
+            <WrapPanel Margin="4,8,4,0">
+              <Border Classes="card" Width="400" DataContext="{Binding Setup}">
+                <StackPanel Spacing="8" x:DataType="vm:SetupViewModel">
+                  <TextBlock Text="ROUTER SIZE" Classes="heading" />
+                  <Grid ColumnDefinitions="120,*" RowDefinitions="Auto,Auto,Auto" RowSpacing="8">
+                    <TextBlock Grid.Row="0" Text="Inputs" Classes="label" />
+                    <NumericUpDown Grid.Row="0" Grid.Column="1" Value="{Binding Inputs}" Minimum="1" Maximum="{Binding MaxInputs}" FormatString="0" Width="140" HorizontalAlignment="Left" />
+                    <TextBlock Grid.Row="1" Text="Outputs" Classes="label" />
+                    <NumericUpDown Grid.Row="1" Grid.Column="1" Value="{Binding Outputs}" Minimum="1" Maximum="{Binding MaxOutputs}" FormatString="0" Width="140" HorizontalAlignment="Left" />
+                    <TextBlock Grid.Row="2" Text="Presets" Classes="label" />
+                    <NumericUpDown Grid.Row="2" Grid.Column="1" Value="{Binding Presets}" Minimum="0" Maximum="{Binding MaxPresets}" FormatString="0" Width="140" HorizontalAlignment="Left" />
+                  </Grid>
+                  <TextBlock Classes="hint" Text="Removing inputs clears any output routed from them. Removing outputs takes them off the network." />
+                  <TextBlock Text="{Binding Error}" Classes="error"
+                             IsVisible="{Binding Error, Converter={x:Static ObjectConverters.IsNotNull}}" />
+                  <Button Content="Apply size" Command="{Binding ApplySizeCommand}" Classes="accent" />
+                </StackPanel>
+              </Border>
+
+              <Border Classes="card" Width="560" DataContext="{Binding Setup}">
+                <StackPanel Spacing="8" x:DataType="vm:SetupViewModel">
+                  <TextBlock Text="NDI" Classes="heading" />
+                  <CheckBox Content="Show sources on this computer" IsChecked="{Binding ShowLocalSources}" />
+                  <Grid ColumnDefinitions="200,*" RowDefinitions="Auto,Auto,Auto" RowSpacing="8">
+                    <TextBlock Grid.Row="0" Text="Find in groups" Classes="label" />
+                    <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding FindGroups}" Watermark="default (public)" />
+                    <TextBlock Grid.Row="1" Text="Extra IPs to query" Classes="label" />
+                    <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding ExtraIps}" Watermark="e.g. 192.168.0.20, 192.168.0.21" />
+                    <TextBlock Grid.Row="2" Text="Publish outputs in groups" Classes="label" />
+                    <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding OutputGroups}" Watermark="default (public)" />
+                  </Grid>
+                  <TextBlock Classes="hint" Text="Separate several groups or addresses with commas." />
+                  <Button Content="Apply" Command="{Binding ApplyNdiCommand}" Classes="accent" />
+                  <TextBlock Text="RUNTIME" Classes="heading" />
+                  <TextBlock Text="{Binding NdiStatus}" Classes="hint" />
+                </StackPanel>
+              </Border>
+
+              <Border Classes="card" Width="560">
+                <StackPanel Spacing="8">
+                  <TextBlock Text="SETTINGS" Classes="heading" />
+                  <TextBlock Classes="hint" Text="Settings and routes are saved automatically as they change, and restored at start-up." />
+                  <TextBlock Text="{Binding Setup.ConfigPath}" Classes="mono" FontSize="12" TextTrimming="CharacterEllipsis"
+                             ToolTip.Tip="{Binding Setup.ConfigPath}" />
+                  <StackPanel Orientation="Horizontal" Spacing="8">
+                    <Button Content="Open settings folder" Command="{Binding OpenSettingsFolderCommand}" />
+                    <Button Content="Import from NDI Router..." Command="{Binding ImportNdiRouterCommand}" />
+                  </StackPanel>
+                </StackPanel>
+              </Border>
+            </WrapPanel>
+          </ScrollViewer>
+        </TabItem>
+      </TabControl>
+
+      <GridSplitter Grid.Row="1" ResizeDirection="Rows" Background="Transparent" />
+
+      <!-- Log -->
+      <Border Grid.Row="2" BorderBrush="{DynamicResource SystemControlForegroundBaseLowBrush}" BorderThickness="1" CornerRadius="4">
+        <DockPanel>
+          <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Spacing="12" Margin="8,4">
+            <TextBlock Text="LOG" Classes="heading" Margin="0" VerticalAlignment="Center" />
+            <Button Content="Copy" Command="{Binding CopyLogCommand}" Padding="10,2" />
+            <Button Content="Clear" Command="{Binding ClearLogCommand}" Padding="10,2" />
+          </StackPanel>
+          <ListBox x:Name="LogList" ItemsSource="{Binding Log}" Classes="compact mono" FontSize="12" />
+        </DockPanel>
+      </Border>
+    </Grid>
+  </DockPanel>
+</Window>

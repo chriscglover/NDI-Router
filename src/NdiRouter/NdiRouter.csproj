@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <AssemblyName>NdiRouter</AssemblyName>
+    <RootNamespace>NdiRouter.Gui</RootNamespace>
+    <Product>NDI Router</Product>
+    <Description>NDI router with Pro-Bel SW-P-08 control and TSL UMD output</Description>
+    <ApplicationIcon>../../assets/NdiRouter.ico</ApplicationIcon>
+    <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
+    <!-- Bindings are checked when building, so a typo in XAML is a build error, not a silent blank -->
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="11.3.20" />
+    <PackageReference Include="Avalonia.Desktop" Version="11.3.20" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.20" />
+    <PackageReference Include="Avalonia.Fonts.Inter" Version="11.3.20" />
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\NdiRouter.Core\NdiRouter.Core.csproj" />
+  </ItemGroup>
+
+  <!-- Window and taskbar icon (the exe icon is ApplicationIcon above). Drawn by tools/IconGenerator. -->
+  <ItemGroup>
+    <AvaloniaResource Include="../../assets/NdiRouter.ico" Link="Assets/NdiRouter.ico" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="NdiRouter.Gui.Tests" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Draws assets/NdiRouter.ico and NdiRouter-256.png. Not part of the solution build.
+       Usage is in Program.cs (XML comments can't contain a double hyphen). -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="SkiaSharp" Version="2.88.9" />
+  </ItemGroup>
+
+</Project>
