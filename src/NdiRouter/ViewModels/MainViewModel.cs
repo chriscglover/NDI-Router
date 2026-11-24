@@ -48,6 +48,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         _host = host;
         Preview = new PreviewViewModel(preview ?? host.Ndi.CreatePreview("NDI Router Preview"));
         Swp08 = new Swp08ViewModel(host);
+        Videohub = new VideohubViewModel(host);
         Tsl = new TslViewModel(host, () => Refresh(layout: false));
         Setup = new SetupViewModel(host, AddLog);
 
@@ -55,11 +56,17 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         host.Router.RouteChanged += OnRouteChanged;
         host.Router.NamesChanged += (_, _) => QueueRefresh(layout: false);
         host.Router.LayoutChanged += (_, _) => QueueRefresh(layout: true);
+        host.Router.LockChanged += OnLockChanged;
         host.Finder.SourcesChanged += sources => Post(() => OnSources(sources));
         host.Tsl.StatusChanged += _ => Post(UpdateStatus);
         host.Swp08.ClientsChanged += (_, _) => Post(() =>
         {
             Swp08.Refresh();
+            UpdateStatus();
+        });
+        host.Videohub.ClientsChanged += (_, _) => Post(() =>
+        {
+            Videohub.Refresh();
             UpdateStatus();
         });
 
@@ -84,6 +91,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     public string Version { get; } = "v" + AppVersion.Display;
 
     public Swp08ViewModel Swp08 { get; }
+    public VideohubViewModel Videohub { get; }
     public TslViewModel Tsl { get; }
     public SetupViewModel Setup { get; }
     public PreviewViewModel Preview { get; }
@@ -117,6 +125,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     [ObservableProperty] private IBrush _ndiBrush = Palette.Off;
     [ObservableProperty] private string _swp08Status = string.Empty;
     [ObservableProperty] private IBrush _swp08Brush = Palette.Off;
+    [ObservableProperty] private string _videohubStatus = string.Empty;
+    [ObservableProperty] private IBrush _videohubBrush = Palette.Off;
     [ObservableProperty] private string _tslStatus = string.Empty;
     [ObservableProperty] private IBrush _tslBrush = Palette.Off;
 
@@ -132,6 +142,19 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         {
             var input = e.Input is int i ? $"input {i + 1} \"{Router.GetInput(i).Label}\"" : "clear";
             var line = $"Route: output {e.Output + 1} \"{Router.GetOutput(e.Output).Label}\" <- {input} ({e.Origin})";
+            Post(() => AddLog(line));
+        }
+        QueueRefresh(layout: false);
+    }
+
+    private void OnLockChanged(object? sender, LockChangedEventArgs e)
+    {
+        if (e.Changed)
+        {
+            var label = Router.GetOutput(e.Output).Label;
+            var line = e.Current is { } held
+                ? $"Lock: output {e.Output + 1} \"{label}\" locked by {held} ({e.Origin})"
+                : $"Lock: output {e.Output + 1} \"{label}\" unlocked ({e.Origin}; was {e.Previous})";
             Post(() => AddLog(line));
         }
         QueueRefresh(layout: false);
@@ -201,7 +224,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             var watching = o < _connections.Length && _connections[o] > 0 ? $"  ·  {_connections[o]} rx" : string.Empty;
             OutputTiles[o].Update(output.Label, "◀ " + source + watching, output.Style, _selected.Contains(o),
                 TileState.Normal, dimmed: false, armed: false,
-                previewed: _previewKind == TileKind.Output && _previewIndex == o);
+                previewed: _previewKind == TileKind.Output && _previewIndex == o, lockedBy: output.Lock);
         }
 
         // Inputs: on air to all the selected outputs (active) or to some (mixed)
@@ -316,6 +339,18 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             Swp08Brush = _host.Config.Swp08.Enabled ? Palette.Fault : Palette.Off;
         }
 
+        var videohubClients = _host.Videohub.Clients().Count;
+        if (_host.Videohub.IsListening)
+        {
+            VideohubStatus = $"Videohub port {_host.Videohub.BoundPort}  ·  {videohubClients} client(s)";
+            VideohubBrush = videohubClients > 0 ? Palette.Ok : Palette.Waiting;
+        }
+        else
+        {
+            VideohubStatus = _host.Config.Videohub.Enabled ? "Videohub not listening" : "Videohub off";
+            VideohubBrush = _host.Config.Videohub.Enabled ? Palette.Fault : Palette.Off;
+        }
+
         var tsl = _host.Tsl.Status;
         TslStatus = tsl;
         TslBrush = !_host.Config.Tsl.Enabled ? Palette.Off
@@ -416,26 +451,47 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         var step = _undo[^1];
         _undo.RemoveAt(_undo.Count - 1);
 
+        var locked = new List<int>();
         foreach (var (output, input) in step.Routes)
-            if (output < Router.OutputCount && (input is null || input < Router.InputCount))
-                Router.Route(output, input, "undo");
+            if (output < Router.OutputCount && (input is null || input < Router.InputCount) &&
+                !Router.Route(output, input, "undo", requester: OutputLock.Panel))
+                locked.Add(output);
 
-        PanelHint = $"Undone: {step.Description}.";
+        PanelHint = locked.Count > 0 ? $"Undone: {step.Description}, except: {LockedList(locked)}." : $"Undone: {step.Description}.";
         UndoChanged();
     }
 
     private bool CanUndo() => _undo.Count > 0;
 
-    /// <summary>Routes from the panel, remembering what each destination had so Undo can put it back.</summary>
+    /// <summary>
+    /// Routes from the panel, remembering what each destination had so Undo can put it back.
+    /// Destinations someone else has locked keep their route, and the hint says which.
+    /// </summary>
     private void RouteUndoably(IReadOnlyList<int> outputs, int? input)
     {
-        var before = outputs.Select(o => (Output: o, Input: Router.GetRoute(o))).Where(r => r.Input != input).ToArray();
-        Router.Route(outputs, input, "panel");
-        if (before.Length == 0) return; // nothing changed
+        var before = outputs.Select(o => (Output: o, Input: Router.GetRoute(o))).ToArray();
+        var locked = Router.Route(outputs, input, "panel", OutputLock.Panel);
+        if (locked.Count > 0) PanelHint = $"Not routed: {LockedList(locked)}. Right-click a destination to unlock it.";
 
-        var names = string.Join(", ", before.Select(r => Router.GetOutput(r.Output).Label));
-        Remember(new UndoStep(input is int i ? $"{Router.GetInput(i).Label} to {names}" : $"clear of {names}", before));
+        var changed = before.Where(r => r.Input != input && !locked.Contains(r.Output)).ToArray();
+        if (changed.Length == 0) return;
+
+        var names = string.Join(", ", changed.Select(r => Router.GetOutput(r.Output).Label));
+        Remember(new UndoStep(input is int i ? $"{Router.GetInput(i).Label} to {names}" : $"clear of {names}", changed));
     }
+
+    /// <summary>"Studio Monitor (locked by Videohub 10.0.0.5)", for each of <paramref name="outputs"/>.</summary>
+    private string LockedList(IEnumerable<int> outputs) =>
+        string.Join(", ", outputs.Select(o => $"{Router.GetOutput(o).Label} (locked by {Router.GetLock(o)})"));
+
+    /// <summary>Locks a destination from the panel (its right-click menu or the outputs table).</summary>
+    public void LockOutput(int index) => Router.Lock(index, new OutputLock(OutputLock.Panel), "panel");
+
+    /// <summary>
+    /// Unlocks a destination from the panel, whoever locked it: the panel is in charge of the
+    /// router, as a Videohub client's force unlock is.
+    /// </summary>
+    public void UnlockOutput(int index) => Router.Unlock(index, OutputLock.Panel, "panel", force: true);
 
     private void Remember(UndoStep step)
     {
@@ -471,13 +527,20 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         }
 
         var before = Router.Routes();
-        if (Router.RecallPreset(index))
+        if (Router.RecallPreset(index, OutputLock.Panel))
         {
             var after = Router.Routes();
             var changed = before.Select((input, o) => (Output: o, Input: input))
                 .Where(r => r.Output < after.Length && after[r.Output] != r.Input).ToArray();
             if (changed.Length > 0) Remember(new UndoStep($"recall of \"{label}\"", changed));
-            PanelHint = $"Recalled \"{label}\".";
+
+            var stored = Router.GetPreset(index).Routes!;
+            var locked = Enumerable.Range(0, Math.Min(stored.Count, after.Length))
+                .Where(o => Router.IsLockedAgainst(o, OutputLock.Panel) && after[o] != (stored[o] < Router.InputCount ? stored[o] : null))
+                .ToList();
+            PanelHint = locked.Count > 0
+                ? $"Recalled \"{label}\", except locked destinations: {LockedList(locked)}."
+                : $"Recalled \"{label}\".";
         }
         else
         {

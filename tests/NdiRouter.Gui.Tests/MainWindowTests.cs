@@ -234,6 +234,63 @@ public sealed class MainWindowTests : IDisposable
     }
 
     [AvaloniaFact]
+    public void A_destination_locked_elsewhere_is_left_alone_by_a_take_until_the_panel_unlocks_it()
+    {
+        var (vm, window) = Open();
+        vm.Router.Lock(1, new OutputLock("Videohub 10.0.0.5"), "test");
+        Dispatcher.UIThread.RunJobs();
+        Assert.True(vm.OutputTiles[1].IsLocked);
+        Assert.Equal("Locked by Videohub 10.0.0.5", vm.OutputTiles[1].LockTip);
+        Assert.True(vm.OutputRows[1].IsLocked);
+
+        vm.SelectOutput(0, additive: false);
+        vm.SelectOutput(1, additive: true);
+        vm.SelectInput(4);
+        vm.TakeCommand.Execute(null);
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Equal(4, vm.Router.GetRoute(0));
+        Assert.Equal(2, vm.Router.GetRoute(1)); // still Graphics
+        Assert.Contains("Studio Monitor (locked by Videohub 10.0.0.5)", vm.PanelHint);
+        Assert.Equal("Undo (Ctrl+Z): Studio Wide to Multiviewer 1", vm.UndoDescription); // only what changed
+
+        // The outputs table's drop-down is put back too.
+        vm.OutputRows[1].Route = vm.RouteChoices[1];
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal(2, vm.Router.GetRoute(1));
+        Assert.Equal(vm.RouteChoices[3], vm.OutputRows[1].Route);
+
+        vm.UnlockOutput(1);
+        Dispatcher.UIThread.RunJobs();
+        Assert.False(vm.OutputTiles[1].IsLocked);
+        Assert.Contains(vm.Log, line => line.Contains("unlocked (panel; was Videohub 10.0.0.5)"));
+
+        vm.SelectInput(4);
+        vm.TakeCommand.Execute(null);
+        Assert.Equal(4, vm.Router.GetRoute(1));
+        Close(vm, window);
+    }
+
+    [AvaloniaFact]
+    public void Ticking_lock_in_the_outputs_table_locks_it_for_the_panel()
+    {
+        var (vm, window) = Open();
+        vm.OutputRows[2].IsLocked = true;
+        Dispatcher.UIThread.RunJobs();
+        Assert.Equal(new OutputLock(OutputLock.Panel), vm.Router.GetLock(2));
+        Assert.Equal("Locked by the panel", vm.OutputRows[2].LockedBy);
+
+        // The panel can still route what it locked; others cannot.
+        Assert.True(vm.Router.Route(2, 1, "panel", requester: OutputLock.Panel));
+        Assert.False(vm.Router.Route(2, 3, "SW-P-08", requester: "SW-P-08 10.0.0.9"));
+
+        vm.OutputRows[2].IsLocked = false;
+        Dispatcher.UIThread.RunJobs();
+        Assert.Null(vm.Router.GetLock(2));
+        Close(vm, window);
+    }
+
+    [AvaloniaFact]
     public void Clicking_the_picked_source_again_unpicks_it()
     {
         var (vm, window) = Open();
@@ -494,7 +551,10 @@ public sealed class MainWindowTests : IDisposable
         vm.AddLog("Route: output 1 \"Multiviewer 1\" <- input 1 \"Camera 1\" (panel)");
         Dispatcher.UIThread.RunJobs();
 
-        foreach (var tab in new[] { "Router", "Inputs", "Outputs", "SW-P-08", "TSL UMD", "Setup" })
+        vm.Router.Lock(2, new OutputLock("Videohub 10.0.0.5"), "test");
+        Dispatcher.UIThread.RunJobs();
+
+        foreach (var tab in new[] { "Router", "Inputs", "Outputs", "SW-P-08", "Videohub", "TSL UMD", "Setup" })
         {
             SelectTab(window, tab);
             var frame = window.CaptureRenderedFrame();

@@ -5,6 +5,18 @@ namespace NdiRouter.Swp08;
 /// <summary>A crosspoint request decoded from a controller. Source is null for an interrogate.</summary>
 public readonly record struct CrosspointRequest(int Matrix, int Level, int Destination, int? Source);
 
+/// <summary>A protect request decoded from a controller. Device is 0 for an interrogate or dump, which carry none.</summary>
+public readonly record struct ProtectRequest(int Matrix, int Level, int Destination, int Device);
+
+/// <summary>SW-P-08 protect states, as carried in PROTECT TALLY and its relatives.</summary>
+public static class Swp08Protect
+{
+    public const int None = 0;
+    public const int ProBel = 1;
+    public const int Override = 2;
+    public const int Oem = 3;
+}
+
 /// <summary>Which names a controller asked for, and at what length.</summary>
 public readonly record struct NameRequest(bool Sources, bool Extended, int Matrix, int Level, int LengthCode)
 {
@@ -186,6 +198,129 @@ public static class Swp08Messages
         return frames;
     }
 
+    // ------------------------------------------------------------------ protects
+
+    /*
+     * Protects lock a destination to the device that set it. SW-P-88 leaves them out; these
+     * layouts follow the full SW-P-08 message set, as decoded by the Wireshark dissector at
+     * github.com/roddypratt/router_dissectors. The normal forms pack the destination and device
+     * number the way crosspoint messages pack destination and source:
+     *
+     *   PROTECT INTERROGATE (0x0A)    matrix/level, multiplier, dest mod 128
+     *   PROTECT CONNECT (0x0C),
+     *   PROTECT DISCONNECT (0x0E)     matrix/level, multiplier, dest mod 128, device mod 128
+     *   PROTECT TALLY (0x0B),
+     *   PROTECT CONNECTED (0x0D),
+     *   PROTECT DISCONNECTED (0x0F)   matrix/level, protect, multiplier, dest mod 128, device mod 128
+     *   PROTECT TALLY DUMP REQUEST (0x13)  matrix/level, first dest (word)
+     *   PROTECT TALLY DUMP (0x14)     matrix/level, count, first dest (word), then a word per
+     *                                 destination: protect state in bits 12-14, device in bits 0-9
+     *
+     * where the multiplier holds dest / 128 in bits 4-6 and device / 128 in bits 0-2. The
+     * extended forms (0x8A-0x8F, 0x93/0x94) carry matrix and level as whole bytes and
+     * destinations and devices as 16-bit words.
+     */
+
+    /// <summary>Highest device number this router puts in a normal-mode protect message.</summary>
+    public const int NormalMaxDevice = 1023;
+
+    public static ProtectRequest ParseProtectInterrogate(byte[] p)
+    {
+        Need(p, 3, "PROTECT INTERROGATE");
+        return new ProtectRequest(p[0] >> 4, p[0] & 0x0F, ((p[1] & 0x70) << 3) | (p[2] & 0x7F), 0);
+    }
+
+    /// <summary>PROTECT CONNECT and PROTECT DISCONNECT share a layout.</summary>
+    public static ProtectRequest ParseProtectChange(byte[] p)
+    {
+        Need(p, 4, "PROTECT CONNECT/DISCONNECT");
+        return new ProtectRequest(
+            p[0] >> 4,
+            p[0] & 0x0F,
+            ((p[1] & 0x70) << 3) | (p[2] & 0x7F),
+            ((p[1] & 0x07) << 7) | (p[3] & 0x7F));
+    }
+
+    public static ProtectRequest ParseExtendedProtectInterrogate(byte[] p)
+    {
+        Need(p, 4, "EXT PROTECT INTERROGATE");
+        return new ProtectRequest(p[0], p[1], (p[2] << 8) | p[3], 0);
+    }
+
+    public static ProtectRequest ParseExtendedProtectChange(byte[] p)
+    {
+        Need(p, 6, "EXT PROTECT CONNECT/DISCONNECT");
+        return new ProtectRequest(p[0], p[1], (p[2] << 8) | p[3], (p[4] << 8) | p[5]);
+    }
+
+    /// <summary>Matrix, level and the first destination wanted; a request without one starts at 0.</summary>
+    public static (int Matrix, int Level, int First) ParseProtectTallyDumpRequest(byte[] p)
+    {
+        Need(p, 1, "PROTECT TALLY DUMP REQUEST");
+        return (p[0] >> 4, p[0] & 0x0F, p.Length >= 3 ? (p[1] << 8) | p[2] : 0);
+    }
+
+    public static (int Matrix, int Level, int First) ParseExtendedProtectTallyDumpRequest(byte[] p)
+    {
+        Need(p, 2, "EXT PROTECT TALLY DUMP REQUEST");
+        return (p[0], p[1], p.Length >= 4 ? (p[2] << 8) | p[3] : 0);
+    }
+
+    public static bool FitsNormalProtect(int matrix, int level, int destination, int device) =>
+        matrix is >= 0 and <= 15 && level is >= 0 and <= 15 &&
+        destination is >= 0 and <= NormalMaxIndex && device is >= 0 and <= NormalMaxDevice;
+
+    /// <summary>PROTECT TALLY, CONNECTED or DISCONNECTED, by <paramref name="command"/>.</summary>
+    public static byte[] ProtectState(byte command, int matrix, int level, int protect, int destination, int device) =>
+        Swp08Codec.Encode(command,
+            (byte)(((matrix & 0x0F) << 4) | (level & 0x0F)),
+            (byte)(protect & 0x0F),
+            (byte)((((destination >> 7) & 0x07) << 4) | ((device >> 7) & 0x07)),
+            (byte)(destination & 0x7F),
+            (byte)(device & 0x7F));
+
+    /// <summary>EXT PROTECT TALLY, CONNECTED or DISCONNECTED, by <paramref name="command"/>.</summary>
+    public static byte[] ExtendedProtectState(byte command, int matrix, int level, int protect, int destination, int device) =>
+        Swp08Codec.Encode(command,
+            (byte)matrix, (byte)level, (byte)protect,
+            (byte)(destination >> 8), (byte)destination,
+            (byte)(device >> 8), (byte)device);
+
+    /// <summary>
+    /// PROTECT TALLY DUMP responses from <paramref name="first"/> to the last destination, split so
+    /// no message exceeds 64 entries or the message size limit.
+    /// </summary>
+    /// <param name="states">Protect state and device for every destination, by destination index.</param>
+    public static List<byte[]> ProtectTallyDump(int matrix, int level, int first, IReadOnlyList<(int Protect, int Device)> states) =>
+        ProtectDump(Swp08Command.ProtectTallyDump, new[] { (byte)(((matrix & 0x0F) << 4) | (level & 0x0F)) }, first, states);
+
+    public static List<byte[]> ExtendedProtectTallyDump(int matrix, int level, int first, IReadOnlyList<(int Protect, int Device)> states) =>
+        ProtectDump(Swp08Command.ExtendedProtectTallyDump, new[] { (byte)matrix, (byte)level }, first, states);
+
+    private static List<byte[]> ProtectDump(byte command, byte[] header, int first, IReadOnlyList<(int Protect, int Device)> states)
+    {
+        var frames = new List<byte[]>();
+        var room = Swp08Codec.MaxDataLength - 1 - header.Length - 3; // command, header, count, first destination
+        var perMessage = Math.Min(Swp08Codec.MaxTalliesPerMessage, room / 2);
+
+        for (var start = Math.Max(0, first); start < states.Count; start += perMessage)
+        {
+            var count = Math.Min(perMessage, states.Count - start);
+            var payload = new List<byte>(header) { (byte)count, (byte)(start >> 8), (byte)start };
+            for (var i = 0; i < count; i++)
+            {
+                var (protect, device) = states[start + i];
+                // The dump has room for devices 0-1023 only, even in its extended form.
+                var word = ((protect & 0x07) << 12) | (device & 0x03FF);
+                payload.Add((byte)(word >> 8));
+                payload.Add((byte)word);
+            }
+            frames.Add(Swp08Codec.Encode(command, payload.ToArray()));
+        }
+
+        return frames;
+    }
+
     // ------------------------------------------------------------------ names
 
     /// <summary>
@@ -314,10 +449,14 @@ public static class Swp08Messages
     {
         Swp08Command.CrosspointTally, Swp08Command.CrosspointConnected,
         Swp08Command.DualControllerStatusResponse,
+        Swp08Command.ProtectTally, Swp08Command.ProtectConnected, Swp08Command.ProtectDisconnected,
+        Swp08Command.ProtectTallyDump,
         Swp08Command.CrosspointTallyDumpByte, Swp08Command.CrosspointTallyDumpWord,
         Swp08Command.NamesUpdated, Swp08Command.ProtocolImplementationResponse,
         Swp08Command.SourceNamesResponse, Swp08Command.DestNamesResponse,
-        Swp08Command.ExtendedTally, Swp08Command.ExtendedConnected, Swp08Command.ExtendedTallyDumpWord,
+        Swp08Command.ExtendedTally, Swp08Command.ExtendedConnected,
+        Swp08Command.ExtendedProtectTally, Swp08Command.ExtendedProtectConnected, Swp08Command.ExtendedProtectDisconnected,
+        Swp08Command.ExtendedProtectTallyDump, Swp08Command.ExtendedTallyDumpWord,
         Swp08Command.ExtendedSourceNamesResponse, Swp08Command.ExtendedDestNamesResponse
     };
 
@@ -325,10 +464,14 @@ public static class Swp08Messages
     public static readonly byte[] ReceivedCommands =
     {
         Swp08Command.CrosspointInterrogate, Swp08Command.CrosspointConnect,
-        Swp08Command.DualControllerStatusRequest, Swp08Command.CrosspointTallyDumpRequest,
+        Swp08Command.DualControllerStatusRequest,
+        Swp08Command.ProtectInterrogate, Swp08Command.ProtectConnect, Swp08Command.ProtectDisconnect,
+        Swp08Command.ProtectTallyDumpRequest, Swp08Command.CrosspointTallyDumpRequest,
         Swp08Command.ProtocolImplementationRequest,
         Swp08Command.GetSourceNames, Swp08Command.GetDestNames,
-        Swp08Command.ExtendedInterrogate, Swp08Command.ExtendedConnect, Swp08Command.ExtendedTallyDumpRequest,
+        Swp08Command.ExtendedInterrogate, Swp08Command.ExtendedConnect,
+        Swp08Command.ExtendedProtectInterrogate, Swp08Command.ExtendedProtectConnect, Swp08Command.ExtendedProtectDisconnect,
+        Swp08Command.ExtendedProtectTallyDumpRequest, Swp08Command.ExtendedTallyDumpRequest,
         Swp08Command.ExtendedGetSourceNames, Swp08Command.ExtendedGetDestNames
     };
 

@@ -91,6 +91,9 @@ public sealed class RouterOutput : ISwp08Named
 
     public ButtonStyle Style { get; set; } = new();
 
+    /// <summary>Who has locked this output against other people's routes, or null when it is free.</summary>
+    public OutputLock? Lock { get; set; }
+
     public RouterOutput Clone() => new()
     {
         Label = Label,
@@ -101,8 +104,25 @@ public sealed class RouterOutput : ISwp08Named
         Input = Input,
         UmdAddress = UmdAddress,
         UmdEnabled = UmdEnabled,
-        Style = Style.Clone()
+        Style = Style.Clone(),
+        Lock = Lock
     };
+}
+
+/// <summary>
+/// A lock on an output (a "protect" in SW-P-08 terms). Only its owner can route the output or
+/// unlock it; anyone else's route is refused. Owners are compared by <see cref="Owner"/>:
+/// "panel", "SW-P-08 10.0.0.5", "Videohub 10.0.0.6" - a controller is known by its address, as
+/// a Videohub knows its clients.
+/// </summary>
+/// <param name="Device">The SW-P-08 device number that set it, reported back to SW-P-08 controllers.</param>
+public sealed record OutputLock(string Owner, int? Device = null)
+{
+    public const string Panel = "panel";
+
+    public override string ToString() => Owner == Panel ? "the panel"
+        : Device is int device ? $"{Owner} (device {device})"
+        : Owner;
 }
 
 /// <summary>A stored set of routes, recalled in one go.</summary>

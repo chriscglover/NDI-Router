@@ -3,12 +3,13 @@ using NdiRouter.Config;
 using NdiRouter.Ndi;
 using NdiRouter.Swp08;
 using NdiRouter.Umd;
+using NdiRouter.Videohub;
 
 namespace NdiRouter.Core;
 
 /// <summary>
-/// Owns the running pieces - NDI runtime, router, source discovery, SW-P-08 server and TSL
-/// sender - and applies settings to them. The window talks to this rather than to each piece.
+/// Owns the running pieces - NDI runtime, router, source discovery, SW-P-08 and Videohub servers
+/// and TSL sender - and applies settings to them. The window talks to this rather than to each piece.
 /// </summary>
 public sealed class RouterHost : IDisposable
 {
@@ -27,6 +28,9 @@ public sealed class RouterHost : IDisposable
         Swp08 = new Swp08Server(Router);
         Swp08.Log += Write;
 
+        Videohub = new VideohubServer(Router);
+        Videohub.Log += Write;
+
         Tsl = new TslOutput(Router);
         Tsl.Log += Write;
     }
@@ -37,6 +41,7 @@ public sealed class RouterHost : IDisposable
     public RouterCore Router { get; }
     public NdiFinder Finder { get; }
     public Swp08Server Swp08 { get; }
+    public VideohubServer Videohub { get; }
     public TslOutput Tsl { get; }
 
     public event Action<string>? Log;
@@ -58,6 +63,7 @@ public sealed class RouterHost : IDisposable
         }
 
         if (Config.Swp08.Enabled) StartSwp08(Config.Swp08);
+        if (Config.Videohub.Enabled) StartVideohub(Config.Videohub);
         Tsl.Apply(Config.Tsl);
     }
 
@@ -97,6 +103,38 @@ public sealed class RouterHost : IDisposable
             StartSwp08(settings);
         else
             Swp08.UpdateSettings(settings);
+    }
+
+    private bool StartVideohub(VideohubSettings settings)
+    {
+        try
+        {
+            Videohub.Start(settings);
+            return true;
+        }
+        catch (SocketException ex)
+        {
+            Write($"Videohub: cannot listen on port {settings.Port}: {ex.Message}");
+            return false;
+        }
+    }
+
+    public void ApplyVideohub(VideohubSettings settings)
+    {
+        var previous = Config.Videohub;
+        Config.Videohub = settings.Clone();
+
+        if (!settings.Enabled)
+        {
+            Videohub.Stop();
+            return;
+        }
+
+        var restart = !Videohub.IsListening || previous.Port != settings.Port || previous.BindAddress != settings.BindAddress;
+        if (restart)
+            StartVideohub(settings);
+        else
+            Videohub.UpdateSettings(settings);
     }
 
     public void ApplyTsl(TslSettings settings)
@@ -173,6 +211,7 @@ public sealed class RouterHost : IDisposable
     public void Dispose()
     {
         Tsl.Dispose();
+        Videohub.Dispose();
         Swp08.Dispose();
         Finder.Dispose();
         Router.Dispose();

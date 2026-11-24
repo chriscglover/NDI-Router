@@ -368,6 +368,115 @@ public class Swp08ServerTests : IDisposable
     }
 
     [Fact]
+    public void Protect_connect_locks_the_destination_and_is_broadcast_to_every_controller()
+    {
+        using var a = Connect();
+        using var b = Connect();
+
+        a.Request(Swp08Command.ProtectConnect, 0x00, 0x00, 2, 5); // dest 2, device 5
+
+        foreach (var controller in new[] { a, b })
+        {
+            var frame = controller.NextFrame();
+            Assert.Equal(Swp08Command.ProtectConnected, frame.Command);
+            Assert.Equal(new byte[] { 0x00, Swp08Protect.ProBel, 0x00, 2, 5 }, frame.Payload);
+        }
+        Assert.Equal(new OutputLock("SW-P-08 127.0.0.1", 5), _router.GetLock(2));
+
+        // The controller that holds it can still route it.
+        a.Request(Swp08Command.CrosspointConnect, 0x00, 0x00, 2, 1);
+        Assert.Equal(Swp08Command.CrosspointConnected, a.NextFrame().Command);
+        Assert.Equal(1, _router.GetRoute(2));
+    }
+
+    [Fact]
+    public void A_destination_locked_elsewhere_refuses_routes_and_protect_changes()
+    {
+        _router.Route(1, 3, "test");
+        _router.Lock(1, new OutputLock(OutputLock.Panel), "panel");
+        using var controller = Connect();
+
+        // The route stays, and the controller is told what it still is.
+        controller.Request(Swp08Command.CrosspointConnect, 0x00, 0x00, 1, 4);
+        var tally = controller.NextFrame();
+        Assert.Equal(Swp08Command.CrosspointTally, tally.Command);
+        Assert.Equal(new CrosspointRequest(0, 0, 1, 3), Swp08Messages.ParseConnect(tally.Payload));
+        Assert.Equal(3, _router.GetRoute(1));
+
+        // So does the lock: held by the panel, which SW-P-08 sees as device 1023. An unsuccessful
+        // protect change is answered on every link, like a successful one, with the protect that stands.
+        using var other = Connect();
+        controller.Request(Swp08Command.ProtectDisconnect, 0x00, 0x00, 1, 5);
+        foreach (var c in new[] { controller, other })
+        {
+            var protect = c.NextFrame();
+            Assert.Equal(Swp08Command.ProtectDisconnected, protect.Command);
+            Assert.Equal(new byte[] { 0x00, Swp08Protect.ProBel, 0x07, 1, 0x7F }, protect.Payload);
+        }
+
+        controller.Request(Swp08Command.ProtectConnect, 0x00, 0x00, 1, 5);
+        var refused = controller.NextFrame();
+        Assert.Equal(Swp08Command.ProtectConnected, refused.Command);
+        Assert.Equal(new byte[] { 0x00, Swp08Protect.ProBel, 0x07, 1, 0x7F }, refused.Payload);
+        Assert.Equal(Swp08Command.ProtectConnected, other.NextFrame().Command);
+
+        Assert.Equal(OutputLock.Panel, _router.GetLock(1)!.Owner);
+    }
+
+    [Fact]
+    public void Protect_dumps_carry_ten_bit_device_numbers()
+    {
+        var dump = Swp08Messages.ProtectTallyDump(0, 0, 0, new[] { (Swp08Protect.ProBel, 1023), (Swp08Protect.None, 0) });
+        Assert.Equal(new byte[] { 0x14, 0x00, 2, 0, 0, 0x13, 0xFF, 0x00, 0x00 }, dump[0][2..^4]);
+    }
+
+    [Fact]
+    public void Protects_can_be_interrogated_dumped_and_removed()
+    {
+        using var controller = Connect();
+        controller.Request(Swp08Command.ProtectConnect, 0x00, 0x00, 0, 9);
+        controller.NextFrame(); // PROTECT CONNECTED
+
+        controller.Request(Swp08Command.ProtectInterrogate, 0x00, 0x00, 0);
+        var tally = controller.NextFrame();
+        Assert.Equal(Swp08Command.ProtectTally, tally.Command);
+        Assert.Equal(new byte[] { 0x00, Swp08Protect.ProBel, 0x00, 0, 9 }, tally.Payload);
+
+        // Count, first destination, then a word each: protect state on top, device below.
+        controller.Request(Swp08Command.ProtectTallyDumpRequest, 0x00, 0, 0);
+        var dump = controller.NextFrame();
+        Assert.Equal(Swp08Command.ProtectTallyDump, dump.Command);
+        Assert.Equal(new byte[] { 0x00, 4, 0, 0, 0x10, 9, 0, 0, 0, 0, 0, 0 }, dump.Payload);
+
+        controller.Request(Swp08Command.ProtectDisconnect, 0x00, 0x00, 0, 9);
+        var freed = controller.NextFrame();
+        Assert.Equal(Swp08Command.ProtectDisconnected, freed.Command);
+        Assert.Equal(new byte[] { 0x00, Swp08Protect.None, 0x00, 0, 9 }, freed.Payload);
+        Assert.Null(_router.GetLock(0));
+    }
+
+    [Fact]
+    public void Extended_protects_carry_whole_words()
+    {
+        using var controller = Connect();
+        controller.Request(Swp08Command.ExtendedProtectConnect, 0, 0, 0, 3, 0x04, 0x00); // dest 3, device 1024
+
+        var frame = controller.NextFrame();
+        Assert.Equal(Swp08Command.ExtendedProtectConnected, frame.Command);
+        Assert.Equal(new byte[] { 0, 0, Swp08Protect.ProBel, 0, 3, 0x04, 0x00 }, frame.Payload);
+        Assert.Equal(1024, _router.GetLock(3)!.Device);
+    }
+
+    [Fact]
+    public void Protect_messages_are_listed_in_the_protocol_implementation()
+    {
+        Assert.Contains(Swp08Command.ProtectConnect, Swp08Messages.ReceivedCommands);
+        Assert.Contains(Swp08Command.ExtendedProtectTallyDumpRequest, Swp08Messages.ReceivedCommands);
+        Assert.Contains(Swp08Command.ProtectConnected, Swp08Messages.TransmittedCommands);
+        Assert.Contains(Swp08Command.ExtendedProtectDisconnected, Swp08Messages.TransmittedCommands);
+    }
+
+    [Fact]
     public void The_port_is_held_exclusively()
     {
         using var other = new Swp08Server(_router);

@@ -26,6 +26,19 @@ public sealed class NamesChangedEventArgs(bool inputs, bool outputs) : EventArgs
     public bool Outputs { get; } = outputs;
 }
 
+public sealed class LockChangedEventArgs(int output, OutputLock? previous, OutputLock? current, string origin) : EventArgs
+{
+    public int Output { get; } = output;
+    public OutputLock? Previous { get; } = previous;
+
+    /// <summary>The lock now on the output, or null when it is free.</summary>
+    public OutputLock? Current { get; } = current;
+
+    public string Origin { get; } = origin;
+
+    public bool Changed => Previous != Current;
+}
+
 /// <summary>
 /// The router: inputs, outputs, presets and the crosspoint state, plus the NDI routing
 /// instance behind each output.
@@ -85,6 +98,10 @@ public sealed class RouterCore : IDisposable
 
     /// <summary>The number of inputs, outputs or presets changed, or a preset was edited.</summary>
     public event EventHandler? LayoutChanged;
+
+    /// <summary>An output was locked or unlocked - also raised when a lock is re-made unchanged,
+    /// because SW-P-08 controllers expect every PROTECT CONNECT to be confirmed.</summary>
+    public event EventHandler<LockChangedEventArgs>? LockChanged;
 
     /// <summary>Something worth telling the operator.</summary>
     public event Action<string>? Log;
@@ -150,28 +167,116 @@ public sealed class RouterCore : IDisposable
 
     // ------------------------------------------------------------------ routing
 
-    /// <summary>Routes an input to an output, or clears the output when <paramref name="input"/> is null.</summary>
-    public bool Route(int output, int? input, string origin, int? level = null)
+    /// <summary>
+    /// Routes an input to an output, or clears the output when <paramref name="input"/> is null.
+    /// Returns false when the output or input does not exist, or the output is locked by someone
+    /// other than <paramref name="requester"/>. A null requester is the router itself - an import
+    /// or a resize - which locks do not stop.
+    /// </summary>
+    public bool Route(int output, int? input, string origin, int? level = null, string? requester = null)
     {
-        RouteChangedEventArgs args;
+        RouteChangedEventArgs? args = null;
+        string? refused = null;
         lock (_gate)
         {
             if (output < 0 || output >= _outputs.Count) return false;
             if (input is int i && (i < 0 || i >= _inputs.Count)) return false;
 
-            var previous = _outputs[output].Input;
-            _outputs[output].Input = input;
-            if (previous != input) ApplyToNdi(output);
-            args = new RouteChangedEventArgs(output, previous, input, origin, level);
+            if (LockedAgainst(output, requester) is { } held)
+            {
+                refused = $"Output {output + 1} \"{_outputs[output].Label}\" is locked by {held}; route from {origin} refused.";
+            }
+            else
+            {
+                var previous = _outputs[output].Input;
+                _outputs[output].Input = input;
+                if (previous != input) ApplyToNdi(output);
+                args = new RouteChangedEventArgs(output, previous, input, origin, level);
+            }
+        }
+
+        if (args is null)
+        {
+            Log?.Invoke(refused!);
+            return false;
         }
 
         RouteChanged?.Invoke(this, args);
         return true;
     }
 
-    public void Route(IEnumerable<int> outputs, int? input, string origin)
+    /// <summary>Routes one input to several outputs. Returns the outputs that refused because they are locked.</summary>
+    public List<int> Route(IEnumerable<int> outputs, int? input, string origin, string? requester = null)
     {
-        foreach (var output in outputs.Distinct().ToList()) Route(output, input, origin);
+        var refused = new List<int>();
+        foreach (var output in outputs.Distinct().ToList())
+            if (!Route(output, input, origin, requester: requester) && IsLockedAgainst(output, requester))
+                refused.Add(output);
+        return refused;
+    }
+
+    // ------------------------------------------------------------------ locks
+
+    public OutputLock? GetLock(int output)
+    {
+        lock (_gate) return output >= 0 && output < _outputs.Count ? _outputs[output].Lock : null;
+    }
+
+    /// <summary>Every output's lock, by output index.</summary>
+    public OutputLock?[] Locks()
+    {
+        lock (_gate) return _outputs.Select(o => o.Lock).ToArray();
+    }
+
+    /// <summary>Whether a route from <paramref name="requester"/> would be refused because someone else holds the output.</summary>
+    public bool IsLockedAgainst(int output, string? requester)
+    {
+        lock (_gate) return output >= 0 && output < _outputs.Count && LockedAgainst(output, requester) is not null;
+    }
+
+    private OutputLock? LockedAgainst(int output, string? requester) =>
+        requester is not null && _outputs[output].Lock is { } held && held.Owner != requester ? held : null;
+
+    /// <summary>
+    /// Locks an output for <paramref name="owner"/>. Re-locking one it already holds succeeds (and
+    /// takes the new device number); one held by someone else is refused.
+    /// </summary>
+    public bool Lock(int output, OutputLock owner, string origin)
+    {
+        LockChangedEventArgs args;
+        lock (_gate)
+        {
+            if (output < 0 || output >= _outputs.Count) return false;
+            var previous = _outputs[output].Lock;
+            if (previous is not null && previous.Owner != owner.Owner) return false;
+
+            _outputs[output].Lock = owner;
+            args = new LockChangedEventArgs(output, previous, owner, origin);
+        }
+
+        LockChanged?.Invoke(this, args);
+        return true;
+    }
+
+    /// <summary>
+    /// Unlocks an output. Only its owner can, unless <paramref name="force"/> - Videohub's force
+    /// unlock, and the panel, which is in charge of the router. Unlocking a free output succeeds.
+    /// </summary>
+    public bool Unlock(int output, string owner, string origin, bool force = false)
+    {
+        LockChangedEventArgs args;
+        lock (_gate)
+        {
+            if (output < 0 || output >= _outputs.Count) return false;
+            var previous = _outputs[output].Lock;
+            if (previous is not null && previous.Owner != owner && !force) return false;
+
+            _outputs[output].Lock = null;
+            args = new LockChangedEventArgs(output, previous, null, origin);
+        }
+
+        LockChanged?.Invoke(this, args);
+        return true;
     }
 
     /// <summary>Points the output's NDI routing instance at its input's source.</summary>
@@ -260,7 +365,8 @@ public sealed class RouterCore : IDisposable
             var output = _outputs[index];
             var before = output.Clone();
             edit(output);
-            output.Input = before.Input; // routes only change through Route(), so they are always announced
+            output.Input = before.Input; // routes and locks only change through Route() and Lock(),
+            output.Lock = before.Lock;   // so they are always announced
 
             if (!string.Equals(before.NdiName, output.NdiName, StringComparison.Ordinal))
             {
@@ -380,8 +486,11 @@ public sealed class RouterCore : IDisposable
         LayoutChanged?.Invoke(this, EventArgs.Empty);
     }
 
-    /// <summary>Applies a stored preset. Outputs added since it was stored are left alone.</summary>
-    public bool RecallPreset(int index)
+    /// <summary>
+    /// Applies a stored preset. Outputs added since it was stored are left alone, and so are
+    /// outputs locked by someone other than <paramref name="requester"/>.
+    /// </summary>
+    public bool RecallPreset(int index, string? requester = null)
     {
         List<int?> routes;
         string label;
@@ -397,7 +506,7 @@ public sealed class RouterCore : IDisposable
         {
             var input = routes[o];
             if (input is int i && i >= InputCount) input = null;
-            Route(o, input, origin);
+            Route(o, input, origin, requester: requester);
         }
 
         return true;

@@ -47,6 +47,10 @@ public sealed partial class TileViewModel(TileKind kind, int index) : Observable
 
     /// <summary>On the preview monitor; marked with a small PVW badge.</summary>
     [ObservableProperty] private bool _isPreviewed;
+
+    /// <summary>A locked destination; marked with a LOCK badge, whose tooltip says who holds it.</summary>
+    [ObservableProperty] private bool _isLocked;
+    [ObservableProperty] private string? _lockTip;
     [ObservableProperty] private double _fontSize = 14.5;
     [ObservableProperty] private FontWeight _fontWeight = FontWeight.Normal;
     [ObservableProperty] private FontStyle _fontStyle = FontStyle.Normal;
@@ -54,10 +58,13 @@ public sealed partial class TileViewModel(TileKind kind, int index) : Observable
 
     /// <summary>Works out the tile's look from the button style and its routing state.</summary>
     /// <param name="preselected">A source picked for the next Take: shown with a yellow edge.</param>
+    /// <param name="lockedBy">Who has locked this destination, if anyone.</param>
     public void Update(string title, string subtitle, ButtonStyle style, bool selected, TileState state, bool dimmed, bool armed,
-        bool preselected = false, bool previewed = false)
+        bool preselected = false, bool previewed = false, OutputLock? lockedBy = null)
     {
         IsPreviewed = previewed;
+        IsLocked = lockedBy is not null;
+        LockTip = lockedBy is null ? null : $"Locked by {lockedBy}";
         selected |= preselected;
         Title = title;
         Subtitle = subtitle;

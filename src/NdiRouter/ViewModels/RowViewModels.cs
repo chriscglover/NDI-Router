@@ -158,6 +158,12 @@ public sealed partial class OutputRowViewModel(RouterCore router, int index, Obs
     [ObservableProperty] private decimal _umdAddress;
     [ObservableProperty] private string _umdText = string.Empty;
 
+    /// <summary>Locked by anyone. Ticking locks it for the panel; clearing unlocks it, whoever holds it.</summary>
+    [ObservableProperty] private bool _isLocked;
+
+    /// <summary>Who holds the lock, for the tooltip.</summary>
+    [ObservableProperty] private string? _lockedBy;
+
     protected override void Edit(Action<ISwp08Named> edit) => Router.UpdateOutput(Index, o => edit(o));
     protected override void EditLabel(string label) => Router.UpdateOutput(Index, o => o.Label = label);
 
@@ -187,7 +193,21 @@ public sealed partial class OutputRowViewModel(RouterCore router, int index, Obs
     {
         // A drop-down whose list is being rebuilt briefly reports no selection; that is not a route.
         if (Syncing || value is null) return;
-        if (Router.GetRoute(Index) != value.Input) Router.Route(Index, value.Input, "outputs table");
+        var current = Router.GetRoute(Index);
+        if (current == value.Input) return;
+        if (Router.Route(Index, value.Input, "outputs table", requester: OutputLock.Panel)) return;
+
+        // Locked by someone else (the router has logged it): show the route it still has.
+        Syncing = true;
+        Route = current is int i && i + 1 < Choices.Count ? Choices[i + 1] : Choices[0];
+        Syncing = false;
+    }
+
+    partial void OnIsLockedChanged(bool value)
+    {
+        if (Syncing) return;
+        if (value) Router.Lock(Index, new OutputLock(OutputLock.Panel), "outputs table");
+        else Router.Unlock(Index, OutputLock.Panel, "outputs table", force: true);
     }
 
     partial void OnUmdEnabledChanged(bool value)
@@ -213,6 +233,8 @@ public sealed partial class OutputRowViewModel(RouterCore router, int index, Obs
             OnPropertyChanged(nameof(Route)); // the list may have been rebuilt around an equal choice
 
             Receivers = receivers;
+            IsLocked = output.Lock is not null;
+            LockedBy = output.Lock is { } held ? $"Locked by {held}" : "Not locked - tick to lock it from the panel";
             UmdEnabled = output.UmdEnabled;
             UmdAddress = output.UmdAddress;
             UmdText = output.UmdEnabled ? UmdEngine.Build(Index, output, inputs, tsl).Message.Text : string.Empty;

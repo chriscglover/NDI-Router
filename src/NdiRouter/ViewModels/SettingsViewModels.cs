@@ -6,6 +6,7 @@ using NdiRouter.Core;
 using NdiRouter.Swp08;
 using NdiRouter.Tsl;
 using NdiRouter.Umd;
+using NdiRouter.Videohub;
 
 namespace NdiRouter.Gui.ViewModels;
 
@@ -90,6 +91,60 @@ public sealed partial class Swp08ViewModel : ObservableObject
         State = _host.Swp08.IsListening
             ? $"Listening on port {_host.Swp08.BoundPort} - {clients.Count} controller(s) connected."
             : _host.Config.Swp08.Enabled ? "Not listening - see the log." : "Off.";
+    }
+}
+
+/// <summary>Blackmagic Videohub control settings, and the connected clients.</summary>
+public sealed partial class VideohubViewModel : ObservableObject
+{
+    private readonly RouterHost _host;
+
+    public VideohubViewModel(RouterHost host)
+    {
+        _host = host;
+        var s = host.Config.Videohub;
+        Enabled = s.Enabled;
+        BindAddress = s.BindAddress;
+        Port = s.Port;
+        AllowLabelChanges = s.AllowLabelChanges;
+        LogTraffic = s.LogTraffic;
+        Refresh();
+    }
+
+    [ObservableProperty] private bool _enabled;
+    [ObservableProperty] private string _bindAddress = "0.0.0.0";
+    [ObservableProperty] private decimal _port;
+    [ObservableProperty] private bool _allowLabelChanges;
+    [ObservableProperty] private bool _logTraffic;
+    [ObservableProperty] private string _state = string.Empty;
+    [ObservableProperty] private bool _hasClients;
+
+    public ObservableCollection<string> Clients { get; } = new();
+
+    [RelayCommand]
+    private void Apply()
+    {
+        _host.ApplyVideohub(new VideohubSettings
+        {
+            Enabled = Enabled,
+            BindAddress = string.IsNullOrWhiteSpace(BindAddress) ? "0.0.0.0" : BindAddress.Trim(),
+            Port = (int)Port,
+            AllowLabelChanges = AllowLabelChanges,
+            LogTraffic = LogTraffic
+        });
+        Refresh();
+    }
+
+    public void Refresh()
+    {
+        var clients = _host.Videohub.Clients();
+        Clients.Clear();
+        foreach (var client in clients) Clients.Add(client);
+        HasClients = clients.Count > 0;
+
+        State = _host.Videohub.IsListening
+            ? $"Listening on port {_host.Videohub.BoundPort} - {clients.Count} client(s) connected."
+            : _host.Config.Videohub.Enabled ? "Not listening - see the log." : "Off.";
     }
 }
 

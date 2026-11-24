@@ -3,6 +3,7 @@ using System.Text.Json.Serialization;
 using NdiRouter.Core;
 using NdiRouter.Swp08;
 using NdiRouter.Umd;
+using NdiRouter.Videohub;
 
 namespace NdiRouter.Config;
 
@@ -29,6 +30,7 @@ public sealed class AppConfig
 
     public NdiSettings Ndi { get; set; } = new();
     public Swp08Settings Swp08 { get; set; } = new();
+    public VideohubSettings Videohub { get; set; } = new();
     public TslSettings Tsl { get; set; } = new();
 
     /// <summary>A brand new configuration: NDI Router's default 8 inputs, 4 outputs and 6 presets.</summary>
@@ -47,6 +49,7 @@ public sealed class AppConfig
         Presets ??= new();
         Ndi ??= new();
         Swp08 ??= new();
+        Videohub ??= new();
         Tsl ??= new();
 
         if (Inputs.Count == 0) Inputs.AddRange(Enumerable.Range(0, RouterDefaults.Inputs).Select(RouterDefaults.Input));

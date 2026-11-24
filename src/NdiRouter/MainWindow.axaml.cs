@@ -148,8 +148,15 @@ public partial class MainWindow : Window
         Item("UMD address...", () => _ = vm.SetUmdAddressAsync(index)),
         Item("Style...", () => _ = vm.StyleOutputAsync(index)),
         new Separator(),
+        LockItem(vm, index),
         Item("Clear route", () => vm.ClearOutput(index))
     };
+
+    /// <summary>"Lock", or "Unlock (locked by ...)" - the panel can unlock anyone's lock.</summary>
+    private static MenuItem LockItem(MainViewModel vm, int index) =>
+        vm.Router.GetLock(index) is { } held
+            ? Item($"Unlock (locked by {held})", () => vm.UnlockOutput(index))
+            : Item("Lock", () => vm.LockOutput(index));
 
     /// <summary>Right-click on an Inputs table row: pick a discovered source, or the row's other actions.</summary>
     private void OnInputRowContextRequested(object? sender, ContextRequestedEventArgs e)

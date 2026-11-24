@@ -1,11 +1,14 @@
 <img src="assets/NdiRouter-256.png" width="96" align="right" alt="" />
 
-# NDI Router (SW-P-08 / TSL)
+# NDI Router (SW-P-08 / Videohub / TSL)
 
 A Windows NDI router with a router control panel and a live preview monitor, plus:
 
 - **Pro-Bel SW-P-08 control over TCP**, so any broadcast control system or panel can route it
   like a hardware router.
+- **Blackmagic Videohub control**, so Videohub Control, Bitfocus Companion and anything else that
+  speaks the Videohub Ethernet Protocol can route it too.
+- **Output locks**, shared by the panel, SW-P-08 (protects) and Videohub.
 - **TSL UMD output** (3.1, 4.0 or 5.0, UDP or TCP), so a multiviewer can show what each output
   is carrying.
 
@@ -70,8 +73,9 @@ itself - NDI, SW-P-08, TSL and settings, in `NdiRouter.Core` - uses no packages 
 
 ## The router
 
-Along the top of the window are three status lights: NDI (runtime and sources found), SW-P-08
-(listening and controllers connected) and TSL (sending). The log runs along the bottom; drag the
+Along the top of the window are four status lights: NDI (runtime and sources found), SW-P-08
+(listening and controllers connected), Videohub (listening and clients connected) and TSL
+(sending). The log runs along the bottom; drag the
 divider to resize it.
 
 The **Router** tab has the sources on the left, the destinations on the right, and the preview
@@ -93,8 +97,9 @@ monitor with **Take** and **Undo** between them. Presets run along the bottom.
 - **Presets:** press *Store preset*, then a preset, to save every destination's route in it. Click
   a preset to recall it.
 - **Right-click** any button to set it up: assign an NDI source to an input (sources are listed
-  by machine), rename, set the SW-P-08 names, change the NDI output name or UMD address, or style
-  the button (background and text colour, size, bold/italic/underline).
+  by machine), rename, set the SW-P-08 names, change the NDI output name or UMD address, lock or
+  unlock a destination, or style the button (background and text colour, size,
+  bold/italic/underline).
 
 Inputs whose source is not on the network are dimmed and marked *offline*. They can still be
 routed, and the NDI runtime connects as soon as the source appears. Each output shows the input
@@ -102,6 +107,22 @@ it carries and how many NDI receivers are watching it.
 
 Re-assigning an input's NDI source re-routes every output on that input, as re-plugging a
 hardware router's input would.
+
+### Locks
+
+A locked destination only takes routes from whoever locked it, so nobody else can change what it
+carries by mistake. Locks are shared by everything that controls the router:
+
+| Locked from | Held by | Seen as |
+|---|---|---|
+| The panel: right-click a destination, or tick *Lock* on the Outputs tab | the panel | SW-P-08: protected by device 1023. Videohub: `L` |
+| SW-P-08 PROTECT CONNECT | the controller's address, with its device number | Videohub: `L` |
+| Videohub `O` | the client's address | SW-P-08: protected by device 1023. Videohub: `O` to clients at that address, `L` to the rest |
+
+A locked destination has a red **LOCK** badge, whose tooltip says who holds it. A Take, Clear, Undo or
+preset leaves locked destinations as they are, and the hint under the presets says which. The panel
+can unlock any destination, as a Videohub client's force unlock can, because it is in charge of the
+router. Locks are saved with the routes and come back when the router restarts.
 
 ### Preview
 
@@ -162,7 +183,11 @@ The settings tab shows the same numbers 1-based, as controllers display them.
 | Command | | Reply |
 |---|---|---|
 | 0x01 / 0x81 | Crosspoint interrogate (normal / extended) | 0x03 / 0x83 tally |
-| 0x02 / 0x82 | Crosspoint connect | 0x04 / 0x84 connected, to **every** controller |
+| 0x02 / 0x82 | Crosspoint connect | 0x04 / 0x84 connected, to **every** controller; a destination someone else has locked is left alone, and the controller is sent its tally |
+| 0x0A / 0x8A | Protect interrogate | 0x0B / 0x8B protect tally |
+| 0x0C / 0x8C | Protect connect | 0x0D / 0x8D protect connected, to every controller - also when refused because someone else holds it, carrying the protect that stands |
+| 0x0E / 0x8E | Protect disconnect | 0x0F / 0x8F protect disconnected, to every controller - also when refused, carrying the protect that stands |
+| 0x13 / 0x93 | Protect tally dump | 0x14 / 0x94, from the destination asked for; devices 0-1023, as the dump's word allows |
 | 0x15 | Crosspoint tally dump | 0x16 (byte) while every destination and source is 191 or less, as SW-P-88 8.2.3 requires; otherwise 0x17 (word). At most 64 per message, 133 bytes |
 | 0x95 | Extended tally dump | 0x97 |
 | 0x64 / 0x66 / 0xE4 / 0xE6 | Source / destination names, 4, 8 or 12 characters | 0x6A / 0x6B / 0xEA / 0xEB |
@@ -211,8 +236,44 @@ right-click a button for *SW-P-08 names...*. Names are printable ASCII and space
 Some controllers also ask for 16 or 32 character names (length codes 3 and 4). These are answered
 with the label fitted to that length; nothing is stored or edited for those lengths.
 
-**Not implemented:** protect, salvos (connect-on-go), single-name requests (0x65/0x67), UMD label
-requests (0x68) and SW-P-02. Serial (RS-422) links are not supported, only TCP.
+**Protects** are the router's [locks](#locks). A controller is known by its address, so every device
+number it uses shares its protects; the device number it sent is reported back. Protect messages are
+not in SW-P-88 either. Their layouts follow the full SW-P-08 message set as the
+[router_dissectors](https://github.com/roddypratt/router_dissectors) Wireshark dissector decodes it:
+protect connect and disconnect pack destination and device as crosspoint connect packs destination
+and source, and protect tally adds the protect state (0 none, 1 Pro-Bel) after the matrix/level byte.
+Master protect (0x1D), override and OEM protects, and protect device names (0x11/0x12) are not
+implemented.
+
+**Not implemented:** salvos (connect-on-go), single-name requests (0x65/0x67), UMD label requests
+(0x68) and SW-P-02. Serial (RS-422) links are not supported, only TCP.
+
+## Videohub control
+
+Off until turned on, on the **Videohub** tab, because Blackmagic's own Videohub server may already
+have the port. Listens on TCP port **9990**, the protocol's port, and speaks the
+[Blackmagic Videohub Ethernet Protocol](https://documents.blackmagicdesign.com/DeveloperManuals/VideohubEthernetProtocol.pdf)
+version 2.3: a text protocol of blocks, each a header line, its lines, and a blank line.
+
+| Videohub | Router |
+|---|---|
+| Output 0 | Output 1 |
+| Input 0 | Input 1 |
+| Input *n*, one after the last, labelled `(clear)` | No source: routing it clears the output, and a cleared output reports it (a Videohub output is always routed somewhere) |
+| `VIDEO OUTPUT LOCKS` `O` / `L` / `U` / `F` | The router's [locks](#locks): owned by this address / locked by anyone else / free / force unlock |
+| `INPUT LABELS`, `OUTPUT LABELS` | The labels, in full |
+
+A client is sent the whole router when it connects (preamble, device, labels, routing, locks, then
+`END PRELUDE`), then every route, lock and label change as it happens, whoever made it. A request
+is answered `ACK` and then the change, or `NAK` if it names an output or input that does not exist.
+A request that is understood but cannot be done, such as routing an output someone else has
+locked, is acknowledged and then answered with the state it still has, as the protocol says a
+Videohub does. Renaming inputs and outputs from a client is off by default; turned off, a rename is
+put back the same way. Resizing the router sends everything but the preamble again, as a new
+Videohub would.
+
+There are no monitoring outputs, serial ports, processing units or frame buffers, so their blocks
+are not sent, and requests for them are answered `NAK`.
 
 ## TSL UMD output
 
@@ -260,17 +321,22 @@ overwritten.
 | [src/NdiRouter.Core/Ndi](src/NdiRouter.Core/Ndi) | NDI runtime loading, P/Invoke, routing outputs, source discovery, the preview receiver |
 | [src/NdiRouter.Core/Core](src/NdiRouter.Core/Core) | The router model and state (`RouterCore`), SW-P-08 names, and `RouterHost` which runs everything |
 | [src/NdiRouter.Core/Swp08](src/NdiRouter.Core/Swp08) | SW-P-08 framing, messages and the TCP server |
+| [src/NdiRouter.Core/Videohub](src/NdiRouter.Core/Videohub) | Videohub block reader and the TCP server |
 | [src/NdiRouter.Core/Tsl](src/NdiRouter.Core/Tsl), [Net](src/NdiRouter.Core/Net), [Umd](src/NdiRouter.Core/Umd) | TSL packets and transports, UMD templates and the paced sender |
 | [src/NdiRouter.Core/Config](src/NdiRouter.Core/Config) | Saved settings and the layout importer |
 | [src/NdiRouter](src/NdiRouter) | The window ([MainWindow.axaml](src/NdiRouter/MainWindow.axaml)), its view models and dialogs |
-| [tests/NdiRouter.Tests](tests/NdiRouter.Tests) | Router, SW-P-08, TSL, names and NDI tests |
+| [tests/NdiRouter.Tests](tests/NdiRouter.Tests) | Router, locks, SW-P-08, Videohub, TSL, names and NDI tests |
 | [tests/NdiRouter.Gui.Tests](tests/NdiRouter.Gui.Tests) | Headless window tests |
 | [tools/IconGenerator](tools/IconGenerator) | Draws [assets/NdiRouter.ico](assets) (16-256 px): `dotnet run --project tools/IconGenerator -- assets` |
 
 ## Testing
 
 - The SW-P-08 framing and crosspoint encoding are tested byte for byte against the worked examples
-  in the SW-P-88 Issue 4b specification (Appendix 1). The server is tested over real TCP sockets.
+  in the SW-P-88 Issue 4b specification (Appendix 1). The server is tested over real TCP sockets,
+  including protects.
+- The Videohub server is tested over real TCP sockets against the dialogues in the protocol
+  document: the connect dump, ACK then update, locks owned and not, refused requests, renames, line
+  endings and resizing.
 - The NDI tests publish test sources, route between them, and confirm that a receiver watching a
   router output receives whichever is routed, without reconnecting. They also confirm that the
   preview receiver shows a source's picture and follows a change of source.
@@ -291,9 +357,19 @@ Checked against SW-P-88 Issue 4b itself:
 - NDI SDK and runtime (the NDI API components this application uses): [ndi.video](https://ndi.video)
 - SW-P-08:
   [Router Technical Reference Guide](https://community.grassvalley.com/support/s/productmanualmaster/a2NPo000002lwz0MAA/router-technical-reference-guide)
+- SW-P-08 protect layouts: [router_dissectors](https://github.com/roddypratt/router_dissectors)
+  (Wireshark dissector)
+- Videohub:
+  [Blackmagic Videohub Ethernet Protocol](https://documents.blackmagicdesign.com/DeveloperManuals/VideohubEthernetProtocol.pdf)
 - TSL UMD: [TSL UMD Protocol](https://tslproducts.com/wp-content/uploads/TSL-UMD-protocol.pdf)
 
 ## Version history
+
+### 1.2.0
+
+Blackmagic Videohub control (Videohub Ethernet Protocol 2.3, port 9990, off by default). Output
+locks, shared by the panel, SW-P-08 protects (now implemented) and Videohub locks, shown with a
+LOCK badge and a Lock column on the Outputs tab, and saved with the routes.
 
 ### 1.1.1
 

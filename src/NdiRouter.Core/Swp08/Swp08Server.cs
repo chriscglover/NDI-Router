@@ -59,10 +59,16 @@ public sealed class Swp08Settings
 /// for the controller's ACK and resent on NAK or timeout.
 ///
 /// Any route change - from a controller, the panel, a preset - is announced to every connected
-/// controller with CROSSPOINT CONNECTED, including the one that asked for it.
+/// controller with CROSSPOINT CONNECTED, including the one that asked for it. Protects work the
+/// same way: a controller is known by its address, so every device number it uses shares its
+/// protects, and a protect set elsewhere (the panel, a Videohub client) is reported as held by
+/// <see cref="ForeignDevice"/>.
 /// </summary>
 public sealed class Swp08Server : IDisposable
 {
+    /// <summary>The device number reported for locks not made over SW-P-08.</summary>
+    public const int ForeignDevice = 1023;
+
     private readonly RouterCore _router;
     private readonly object _gate = new();
     private readonly List<Swp08Connection> _connections = new();
@@ -78,6 +84,7 @@ public sealed class Swp08Server : IDisposable
         _router = router;
         _router.RouteChanged += OnRouteChanged;
         _router.NamesChanged += OnNamesChanged;
+        _router.LockChanged += OnLockChanged;
         _namesTimer = new System.Threading.Timer(_ => FlushNamesUpdated());
     }
 
@@ -211,6 +218,50 @@ public sealed class Swp08Server : IDisposable
                     Connect(connection, Swp08Messages.ParseExtendedConnect(frame.Payload));
                     break;
 
+                case Swp08Command.ProtectInterrogate:
+                    ProtectInterrogate(connection, Swp08Messages.ParseProtectInterrogate(frame.Payload), extended: false);
+                    break;
+
+                case Swp08Command.ExtendedProtectInterrogate:
+                    connection.UsesExtended = true;
+                    ProtectInterrogate(connection, Swp08Messages.ParseExtendedProtectInterrogate(frame.Payload), extended: true);
+                    break;
+
+                case Swp08Command.ProtectConnect:
+                    Protect(connection, Swp08Messages.ParseProtectChange(frame.Payload), on: true);
+                    break;
+
+                case Swp08Command.ExtendedProtectConnect:
+                    connection.UsesExtended = true;
+                    Protect(connection, Swp08Messages.ParseExtendedProtectChange(frame.Payload), on: true);
+                    break;
+
+                case Swp08Command.ProtectDisconnect:
+                    Protect(connection, Swp08Messages.ParseProtectChange(frame.Payload), on: false);
+                    break;
+
+                case Swp08Command.ExtendedProtectDisconnect:
+                    connection.UsesExtended = true;
+                    Protect(connection, Swp08Messages.ParseExtendedProtectChange(frame.Payload), on: false);
+                    break;
+
+                case Swp08Command.ProtectTallyDumpRequest:
+                {
+                    var (matrix, level, first) = Swp08Messages.ParseProtectTallyDumpRequest(frame.Payload);
+                    if (!Addressed(connection, matrix, level, "PROTECT TALLY DUMP")) break;
+                    connection.Enqueue(Swp08Messages.ProtectTallyDump(matrix, level, first, ProtectStates()));
+                    break;
+                }
+
+                case Swp08Command.ExtendedProtectTallyDumpRequest:
+                {
+                    connection.UsesExtended = true;
+                    var (matrix, level, first) = Swp08Messages.ParseExtendedProtectTallyDumpRequest(frame.Payload);
+                    if (!Addressed(connection, matrix, level, "EXT PROTECT TALLY DUMP")) break;
+                    connection.Enqueue(Swp08Messages.ExtendedProtectTallyDump(matrix, level, first, ProtectStates()));
+                    break;
+                }
+
                 case Swp08Command.CrosspointTallyDumpRequest:
                 {
                     var (matrix, level) = Swp08Messages.ParseTallyDumpRequest(frame.Payload);
@@ -292,12 +343,80 @@ public sealed class Swp08Server : IDisposable
             return;
         }
 
-        var source = Encode(_router.GetRoute(request.Destination));
-        var normal = !extended && Swp08Messages.FitsNormal(request.Matrix, request.Level, request.Destination, source);
-        connection.Enqueue(normal
-            ? Swp08Messages.Tally(request.Matrix, request.Level, request.Destination, source)
-            : Swp08Messages.ExtendedTally(request.Matrix, request.Level, request.Destination, source));
+        SendTally(connection, request.Matrix, request.Level, request.Destination, extended);
     }
+
+    /// <summary>CROSSPOINT TALLY for one destination, to one controller.</summary>
+    private void SendTally(Swp08Connection connection, int matrix, int level, int destination, bool extended)
+    {
+        var source = Encode(_router.GetRoute(destination));
+        var normal = !extended && Swp08Messages.FitsNormal(matrix, level, destination, source);
+        connection.Enqueue(normal
+            ? Swp08Messages.Tally(matrix, level, destination, source)
+            : Swp08Messages.ExtendedTally(matrix, level, destination, source));
+    }
+
+    private void ProtectInterrogate(Swp08Connection connection, ProtectRequest request, bool extended)
+    {
+        if (!Addressed(connection, request.Matrix, request.Level, "PROTECT INTERROGATE")) return;
+        if (request.Destination >= _router.OutputCount)
+        {
+            Ignored(connection, $"PROTECT INTERROGATE of destination {request.Destination + 1}, which does not exist");
+            return;
+        }
+
+        SendProtect(connection, Swp08Command.ProtectTally, request.Matrix, request.Level, request.Destination,
+            _router.GetLock(request.Destination), extended);
+    }
+
+    /// <summary>PROTECT CONNECT (<paramref name="on"/>) or DISCONNECT from a controller.</summary>
+    private void Protect(Swp08Connection connection, ProtectRequest request, bool on)
+    {
+        var what = on ? "PROTECT CONNECT" : "PROTECT DISCONNECT";
+        if (!Addressed(connection, request.Matrix, request.Level, what)) return;
+        if (request.Destination >= _router.OutputCount)
+        {
+            Log?.Invoke($"SW-P-08 {connection.Remote}: {what} for destination {request.Destination + 1}, which does not exist.");
+            return;
+        }
+
+        var origin = $"SW-P-08 {connection.Remote}";
+        var done = on
+            ? _router.Lock(request.Destination, new OutputLock(connection.Owner, request.Device), origin)
+            : _router.Unlock(request.Destination, connection.Owner, origin);
+
+        // Done: PROTECT CONNECTED / DISCONNECTED goes to every controller from OnLockChanged.
+        // Refused: the same message goes to every controller anyway, carrying the protect that
+        // still stands - a controller answers an unsuccessful change as it does a successful one.
+        if (!done)
+        {
+            var held = _router.GetLock(request.Destination);
+            Log?.Invoke($"SW-P-08 {connection.Remote}: {what} for destination {request.Destination + 1} refused; it is locked by {held}.");
+            var (protect, device) = ProtectState(held);
+            BroadcastProtect(on ? Swp08Command.ProtectConnected : Swp08Command.ProtectDisconnected,
+                request.Destination, protect, device);
+        }
+    }
+
+    /// <summary>A protect message about one destination: TALLY, CONNECTED or DISCONNECTED by <paramref name="command"/>.</summary>
+    private static void SendProtect(Swp08Connection connection, byte command, int matrix, int level, int destination,
+        OutputLock? held, bool extended)
+    {
+        var (protect, device) = ProtectState(held);
+        connection.Enqueue(ProtectFrame(command, matrix, level, destination, protect, device,
+            extended || !Swp08Messages.FitsNormalProtect(matrix, level, destination, device)));
+    }
+
+    private static byte[] ProtectFrame(byte command, int matrix, int level, int destination, int protect, int device, bool extended) =>
+        extended
+            ? Swp08Messages.ExtendedProtectState((byte)(command | 0x80), matrix, level, protect, destination, device)
+            : Swp08Messages.ProtectState(command, matrix, level, protect, destination, device);
+
+    /// <summary>How a lock looks to a SW-P-08 controller.</summary>
+    private static (int Protect, int Device) ProtectState(OutputLock? held) =>
+        held is null ? (Swp08Protect.None, 0) : (Swp08Protect.ProBel, held.Device ?? ForeignDevice);
+
+    private List<(int Protect, int Device)> ProtectStates() => _router.Locks().Select(ProtectState).ToList();
 
     private void Connect(Swp08Connection connection, CrosspointRequest request)
     {
@@ -325,8 +444,10 @@ public sealed class Swp08Server : IDisposable
             return;
         }
 
-        // The CONNECTED that confirms this goes out from OnRouteChanged, to every controller.
-        _router.Route(request.Destination, input, $"SW-P-08 {connection.Remote}", request.Level);
+        // The CONNECTED that confirms this goes out from OnRouteChanged, to every controller. A
+        // destination someone else has locked stays as it is, and this controller is told so.
+        if (!_router.Route(request.Destination, input, $"SW-P-08 {connection.Remote}", request.Level, connection.Owner))
+            SendTally(connection, request.Matrix, request.Level, request.Destination, connection.UsesExtended);
     }
 
     /// <summary>The wire source for a route: the input index, or the clear source when nothing is routed.</summary>
@@ -360,6 +481,31 @@ public sealed class Swp08Server : IDisposable
             foreach (var connection in connections)
                 connection.Enqueue(connection.UsesExtended || normal is null ? extended : normal);
         }
+    }
+
+    /// <summary>PROTECT CONNECTED or DISCONNECTED to every controller, as a route change gets CONNECTED.</summary>
+    private void OnLockChanged(object? sender, LockChangedEventArgs e)
+    {
+        var command = e.Current is null ? Swp08Command.ProtectDisconnected : Swp08Command.ProtectConnected;
+        var (protect, device) = ProtectState(e.Current);
+        if (e.Current is null && e.Previous is not null) device = e.Previous.Device ?? ForeignDevice;
+        BroadcastProtect(command, e.Output, protect, device);
+    }
+
+    /// <summary>A PROTECT CONNECTED or DISCONNECTED on every link, extended to controllers that use extended messages.</summary>
+    private void BroadcastProtect(byte command, int destination, int protect, int device)
+    {
+        List<Swp08Connection> connections;
+        lock (_gate) connections = _connections.ToList();
+        if (connections.Count == 0) return;
+
+        var s = _settings;
+        var fits = Swp08Messages.FitsNormalProtect(s.Matrix, s.Level, destination, device);
+        var extended = ProtectFrame(command, s.Matrix, s.Level, destination, protect, device, extended: true);
+        var normal = fits ? ProtectFrame(command, s.Matrix, s.Level, destination, protect, device, extended: false) : null;
+
+        foreach (var connection in connections)
+            connection.Enqueue(connection.UsesExtended || normal is null ? extended : normal);
     }
 
     private void OnNamesChanged(object? sender, NamesChangedEventArgs e)
@@ -399,6 +545,7 @@ public sealed class Swp08Server : IDisposable
     {
         _router.RouteChanged -= OnRouteChanged;
         _router.NamesChanged -= OnNamesChanged;
+        _router.LockChanged -= OnLockChanged;
         Stop();
         _namesTimer.Dispose();
     }
@@ -427,9 +574,13 @@ internal sealed class Swp08Connection
         _client = client;
         _stream = client.GetStream();
         Remote = client.Client.RemoteEndPoint?.ToString() ?? "unknown";
+        Owner = $"SW-P-08 {RemoteAddress.Of(client)}";
     }
 
     public string Remote { get; }
+
+    /// <summary>Who this controller is to the router's locks: "SW-P-08 10.0.0.5".</summary>
+    public string Owner { get; }
 
     /// <summary>Set once the controller uses an extended command; it then gets extended replies.</summary>
     public volatile bool UsesExtended;

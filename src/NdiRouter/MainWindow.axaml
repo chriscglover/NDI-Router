@@ -28,10 +28,17 @@
           <TextBlock Grid.Row="2" Text="{Binding Subtitle}" FontSize="10.5" Foreground="{Binding SubForeground}"
                      HorizontalAlignment="Center" TextTrimming="CharacterEllipsis" />
         </Grid>
-        <Border IsVisible="{Binding IsPreviewed}" Background="#2E7D32" CornerRadius="3" Padding="4,0"
-                HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,6,7,0" IsHitTestVisible="False">
-          <TextBlock Text="PVW" FontSize="9" FontWeight="Bold" Foreground="White" />
-        </Border>
+        <StackPanel Orientation="Horizontal" Spacing="3" HorizontalAlignment="Right" VerticalAlignment="Top"
+                    Margin="0,6,7,0">
+          <Border IsVisible="{Binding IsLocked}" Background="#C62828" CornerRadius="3" Padding="4,0"
+                  ToolTip.Tip="{Binding LockTip}">
+            <TextBlock Text="LOCK" FontSize="9" FontWeight="Bold" Foreground="White" />
+          </Border>
+          <Border IsVisible="{Binding IsPreviewed}" Background="#2E7D32" CornerRadius="3" Padding="4,0"
+                  IsHitTestVisible="False">
+            <TextBlock Text="PVW" FontSize="9" FontWeight="Bold" Foreground="White" />
+          </Border>
+        </StackPanel>
       </Panel>
     </DataTemplate>
   </Window.Resources>
@@ -54,6 +61,10 @@
           <StackPanel Orientation="Horizontal" Spacing="7" VerticalAlignment="Center">
             <Ellipse Width="10" Height="10" Fill="{Binding Swp08Brush}" />
             <TextBlock Text="{Binding Swp08Status}" />
+          </StackPanel>
+          <StackPanel Orientation="Horizontal" Spacing="7" VerticalAlignment="Center">
+            <Ellipse Width="10" Height="10" Fill="{Binding VideohubBrush}" />
+            <TextBlock Text="{Binding VideohubStatus}" />
           </StackPanel>
           <StackPanel Orientation="Horizontal" Spacing="7" VerticalAlignment="Center">
             <Ellipse Width="10" Height="10" Fill="{Binding TslBrush}" />
@@ -230,9 +241,9 @@
               <Button Content="Generate all SW-P-08 names from labels" Command="{Binding GenerateAllNamesCommand}"
                       CommandParameter="outputs" />
               <TextBlock Classes="hint" VerticalAlignment="Center" MaxWidth="900"
-                         Text="Output n is SW-P-08 destination n-1, published on the network under its NDI name. Rx counts the NDI receivers watching it; UMD text is what TSL sends to its address." />
+                         Text="Output n is SW-P-08 destination n-1, published on the network under its NDI name. Rx counts the NDI receivers watching it; UMD text is what TSL sends to its address. A locked output only takes routes from whoever locked it; clearing the tick unlocks it, whoever that was." />
             </StackPanel>
-            <Grid DockPanel.Dock="Top" ColumnDefinitions="44,2*,70,110,158,2*,2*,44,56,100,2*" Margin="8,0,24,4">
+            <Grid DockPanel.Dock="Top" ColumnDefinitions="44,2*,70,110,158,2*,2*,50,44,56,100,2*" Margin="8,0,24,4">
               <TextBlock Grid.Column="0" Text="Out" Classes="hint" />
               <TextBlock Grid.Column="1" Text="Label" Classes="hint" />
               <TextBlock Grid.Column="2" Text="4 char" Classes="hint" />
@@ -240,16 +251,17 @@
               <TextBlock Grid.Column="4" Text="12 char" Classes="hint" />
               <TextBlock Grid.Column="5" Text="NDI output name" Classes="hint" />
               <TextBlock Grid.Column="6" Text="Routed from" Classes="hint" />
-              <TextBlock Grid.Column="7" Text="Rx" Classes="hint" />
-              <TextBlock Grid.Column="8" Text="UMD" Classes="hint" />
-              <TextBlock Grid.Column="9" Text="UMD addr" Classes="hint" />
-              <TextBlock Grid.Column="10" Text="UMD text" Classes="hint" />
+              <TextBlock Grid.Column="7" Text="Lock" Classes="hint" />
+              <TextBlock Grid.Column="8" Text="Rx" Classes="hint" />
+              <TextBlock Grid.Column="9" Text="UMD" Classes="hint" />
+              <TextBlock Grid.Column="10" Text="UMD addr" Classes="hint" />
+              <TextBlock Grid.Column="11" Text="UMD text" Classes="hint" />
             </Grid>
             <ScrollViewer>
               <ItemsControl ItemsSource="{Binding OutputRows}">
                 <ItemsControl.ItemTemplate>
                   <DataTemplate x:DataType="vm:OutputRowViewModel">
-                    <Grid Classes="row" ColumnDefinitions="44,2*,70,110,158,2*,2*,44,56,100,2*" Margin="8,2,8,2" Background="Transparent">
+                    <Grid Classes="row" ColumnDefinitions="44,2*,70,110,158,2*,2*,50,44,56,100,2*" Margin="8,2,8,2" Background="Transparent">
                       <Grid.ContextMenu>
                         <ContextMenu>
                           <MenuItem Header="Generate SW-P-08 names from label" Command="{Binding GenerateNamesCommand}" />
@@ -266,11 +278,12 @@
                       <TextBox Grid.Column="5" Text="{Binding NdiName, UpdateSourceTrigger=LostFocus}" />
                       <ComboBox Grid.Column="6" ItemsSource="{Binding Choices}" SelectedItem="{Binding Route}"
                                 HorizontalAlignment="Stretch" Margin="0,0,6,0" />
-                      <TextBlock Grid.Column="7" Text="{Binding Receivers}" VerticalAlignment="Center" />
-                      <CheckBox Grid.Column="8" IsChecked="{Binding UmdEnabled}" />
-                      <NumericUpDown Grid.Column="9" Value="{Binding UmdAddress}" Minimum="0" Maximum="65534"
+                      <CheckBox Grid.Column="7" IsChecked="{Binding IsLocked}" ToolTip.Tip="{Binding LockedBy}" />
+                      <TextBlock Grid.Column="8" Text="{Binding Receivers}" VerticalAlignment="Center" />
+                      <CheckBox Grid.Column="9" IsChecked="{Binding UmdEnabled}" />
+                      <NumericUpDown Grid.Column="10" Value="{Binding UmdAddress}" Minimum="0" Maximum="65534"
                                      FormatString="0" Margin="0,0,6,0" ShowButtonSpinner="False" />
-                      <TextBlock Grid.Column="10" Text="{Binding UmdText}" Classes="mono" VerticalAlignment="Center"
+                      <TextBlock Grid.Column="11" Text="{Binding UmdText}" Classes="mono" VerticalAlignment="Center"
                                  TextTrimming="CharacterEllipsis" />
                     </Grid>
                   </DataTemplate>
@@ -326,7 +339,45 @@
                   <TextBlock Text="No controllers connected." Classes="hint" IsVisible="{Binding !HasClients}" />
                   <ListBox ItemsSource="{Binding Clients}" Classes="compact mono" FontSize="12.5" IsVisible="{Binding HasClients}" />
                   <TextBlock Classes="hint"
-                             Text="Each TCP connection is its own SW-P-08 link. Every route change - from any controller, the panel or a preset - is sent to all of them as CONNECTED." />
+                             Text="Each TCP connection is its own SW-P-08 link. Every route change - from any controller, the panel or a preset - is sent to all of them as CONNECTED. Protects are the router's locks: a controller is known by its address, and a lock made on the panel or from Videohub shows as held by device 1023." />
+                </StackPanel>
+              </Border>
+            </WrapPanel>
+          </ScrollViewer>
+        </TabItem>
+
+        <!-- ============================================================ Videohub -->
+        <TabItem Header="Videohub">
+          <ScrollViewer>
+            <WrapPanel Margin="4,8,4,0">
+              <Border Classes="card" Width="520" DataContext="{Binding Videohub}">
+                <StackPanel x:DataType="vm:VideohubViewModel" Spacing="8">
+                  <TextBlock Text="BLACKMAGIC VIDEOHUB CONTROL" Classes="heading" />
+                  <CheckBox Content="Accept Videohub control" IsChecked="{Binding Enabled}" />
+                  <Grid ColumnDefinitions="180,*" RowDefinitions="Auto,Auto" RowSpacing="8">
+                    <TextBlock Grid.Row="0" Text="Listen on address" Classes="label" />
+                    <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding BindAddress}" Width="180" HorizontalAlignment="Left" />
+                    <TextBlock Grid.Row="1" Text="TCP port" Classes="label" />
+                    <NumericUpDown Grid.Row="1" Grid.Column="1" Value="{Binding Port}" Minimum="1" Maximum="65535" FormatString="0" Width="140" HorizontalAlignment="Left" />
+                  </Grid>
+                  <CheckBox Content="Let clients rename inputs and outputs" IsChecked="{Binding AllowLabelChanges}" />
+                  <CheckBox Content="Log every message" IsChecked="{Binding LogTraffic}" />
+                  <TextBlock Classes="hint"
+                             Text="Videohub Ethernet Protocol 2.3, as Blackmagic's Videohub Control and Bitfocus Companion speak it; 9990 is its port. Inputs and outputs are numbered from 0. A Videohub output is always routed, so one extra input after the last, (clear), stands for nothing routed. Locks are the router's locks: a client owns the ones made from its address and can force-unlock anyone's." />
+                  <StackPanel Orientation="Horizontal" Spacing="12">
+                    <Button Content="Apply" Command="{Binding ApplyCommand}" Classes="accent" MinWidth="90" />
+                    <TextBlock Text="{Binding State}" VerticalAlignment="Center" />
+                  </StackPanel>
+                </StackPanel>
+              </Border>
+
+              <Border Classes="card" Width="520" DataContext="{Binding Videohub}">
+                <StackPanel x:DataType="vm:VideohubViewModel" Spacing="8">
+                  <TextBlock Text="CONNECTED CLIENTS" Classes="heading" />
+                  <TextBlock Text="No clients connected." Classes="hint" IsVisible="{Binding !HasClients}" />
+                  <ListBox ItemsSource="{Binding Clients}" Classes="compact mono" FontSize="12.5" IsVisible="{Binding HasClients}" />
+                  <TextBlock Classes="hint"
+                             Text="Each client is sent the whole router when it connects, then every route, lock and label change as it happens - from any client, SW-P-08 or the panel." />
                 </StackPanel>
               </Border>
             </WrapPanel>
