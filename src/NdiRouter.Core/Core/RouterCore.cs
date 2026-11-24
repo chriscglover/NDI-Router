@@ -236,17 +236,18 @@ public sealed class RouterCore : IDisposable
     }
 
     /// <summary>
-    /// Assigns an NDI source to an input. An input still carrying its default label is named after
-    /// the source, as NDI Router does; a label the operator has set is left alone.
+    /// Assigns an NDI source to an input, which takes the source's name - the part in brackets - as
+    /// its label, whether it was picked or typed. The label can be changed afterwards; it is only
+    /// replaced again when the source changes, or is unassigned, which puts back "Input n".
     /// </summary>
     public void AssignSource(int index, string source)
     {
         source = (source ?? string.Empty).Trim();
         UpdateInput(index, input =>
         {
+            if (input.NdiSource == source) return; // the same source again keeps a typed label
             input.NdiSource = source;
-            if (source.Length > 0 && (input.Label.Length == 0 || input.Label == RouterDefaults.Input(index).Label))
-                input.Label = NdiName.Channel(source);
+            input.Label = source.Length > 0 ? NdiName.Channel(source) : RouterDefaults.Input(index).Label;
         });
     }
 

@@ -3,6 +3,7 @@ using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
+using Avalonia.VisualTree;
 using NdiRouter.Gui.ViewModels;
 using NdiRouter.Gui.Views;
 using NdiRouter.Ndi;
@@ -24,6 +25,7 @@ public partial class MainWindow : Window
         }
 
         OutputTiles.DoubleTapped += OnOutputDoubleTapped;
+        InputRowsList.AddHandler(ContextRequestedEvent, OnInputRowContextRequested, RoutingStrategies.Bubble);
 
         // Tunnel, so the shortcuts win over whichever panel button has focus (Enter would click it)
         AddHandler(KeyDownEvent, OnPanelKeyDown, RoutingStrategies.Tunnel);
@@ -149,11 +151,55 @@ public partial class MainWindow : Window
         Item("Clear route", () => vm.ClearOutput(index))
     };
 
+    /// <summary>Right-click on an Inputs table row: pick a discovered source, or the row's other actions.</summary>
+    private void OnInputRowContextRequested(object? sender, ContextRequestedEventArgs e)
+    {
+        if (_viewModel is null || (e.Source as StyledElement)?.DataContext is not InputRowViewModel row
+            || e.Source is not Control target) return;
+
+        var vm = _viewModel;
+        var index = row.Index;
+        var current = vm.Router.GetInput(index).NdiSource;
+        var items = new List<Control>();
+
+        // In the source box: its usual Cut/Copy/Paste first, then the sources to pick from
+        if (target.FindAncestorOfType<TextBox>(includeSelf: true) is { } text)
+        {
+            items.Add(Item("Cut", text.Cut, enabled: text.CanCut));
+            items.Add(Item("Copy", text.Copy, enabled: text.CanCopy));
+            items.Add(Item("Paste", text.Paste, enabled: text.CanPaste));
+            items.Add(new Separator());
+        }
+
+        items.Add(AssignSourceMenu(vm, index, current));
+        items.Add(Item("Unassign source", () => vm.AssignSource(index, string.Empty), enabled: current.Length > 0));
+        items.Add(new Separator());
+        items.Add(Item("Generate SW-P-08 names from label", () => row.GenerateNamesCommand.Execute(null)));
+
+        new ContextMenu { ItemsSource = items }.Open(target);
+        e.Handled = true;
+    }
+
     private static List<Control> InputMenu(MainViewModel vm, int index)
     {
         var current = vm.Router.GetInput(index).NdiSource;
 
-        // Sources grouped by the machine they are on, as NDI Router lists them.
+        return new List<Control>
+        {
+            AssignSourceMenu(vm, index, current),
+            Item("Type a source name...", () => _ = vm.TypeSourceAsync(index)),
+            Item("Unassign source", () => vm.AssignSource(index, string.Empty), enabled: current.Length > 0),
+            new Separator(),
+            Item("Rename...", () => _ = vm.RenameInputAsync(index)),
+            Item("SW-P-08 names...", () => _ = vm.EditInputNamesAsync(index)),
+            Item("Generate SW-P-08 names from label", () => vm.InputRows[index].GenerateNamesCommand.Execute(null)),
+            Item("Style...", () => _ = vm.StyleInputAsync(index))
+        };
+    }
+
+    /// <summary>"Assign NDI source": the discovered sources, grouped by the machine they are on, current one ticked.</summary>
+    private static MenuItem AssignSourceMenu(MainViewModel vm, int index, string current)
+    {
         var assign = new MenuItem { Header = "Assign NDI source" };
         var machines = vm.Sources.GroupBy(NdiName.Machine, StringComparer.OrdinalIgnoreCase).ToList();
         if (machines.Count == 0)
@@ -178,17 +224,7 @@ public partial class MainWindow : Window
             }).ToList();
         }
 
-        return new List<Control>
-        {
-            assign,
-            Item("Type a source name...", () => _ = vm.TypeSourceAsync(index)),
-            Item("Unassign source", () => vm.AssignSource(index, string.Empty), enabled: current.Length > 0),
-            new Separator(),
-            Item("Rename...", () => _ = vm.RenameInputAsync(index)),
-            Item("SW-P-08 names...", () => _ = vm.EditInputNamesAsync(index)),
-            Item("Generate SW-P-08 names from label", () => vm.InputRows[index].GenerateNamesCommand.Execute(null)),
-            Item("Style...", () => _ = vm.StyleInputAsync(index))
-        };
+        return assign;
     }
 
     private static List<Control> PresetMenu(MainViewModel vm, int index)

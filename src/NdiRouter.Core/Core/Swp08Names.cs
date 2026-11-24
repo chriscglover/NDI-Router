@@ -133,9 +133,29 @@ public static class Swp08Names
         packed = Pack(words);
         if (packed.Length <= length) return packed;
         var last = words[^1].ToString();
-        return last.All(char.IsDigit) && last.Length < length
-            ? packed[..(length - last.Length)] + last
-            : packed[..length];
+        if (!last.All(char.IsDigit) || last.Length >= length) return Cut(packed, length, string.Empty);
+        return Cut(Pack(words[..^1]), length, last);
+    }
+
+    /// <summary>
+    /// The longest start of <paramref name="text"/> that fits in <paramref name="length"/> with
+    /// <paramref name="tail"/> after it. The cut never falls inside a number, and a number before a
+    /// numeric tail keeps a space between them, so "RTX 2070 SUPER 1" never becomes "R20701".
+    /// </summary>
+    private static string Cut(string text, int length, string tail)
+    {
+        for (var keep = Math.Min(text.Length, length - tail.Length); keep > 0; keep--)
+        {
+            if (keep < text.Length && char.IsDigit(text[keep - 1]) && char.IsDigit(text[keep])) continue; // inside a number
+
+            var head = text[..keep].TrimEnd();
+            if (head.Length == 0) break;
+            var gap = tail.Length > 0 && char.IsDigit(head[^1]) && char.IsDigit(tail[0]) ? " " : string.Empty;
+            if (head.Length + gap.Length + tail.Length <= length) return head + gap + tail;
+        }
+
+        // Nothing fits whole: the tail alone, or failing that the text cut short.
+        return tail.Length > 0 ? tail : text[..length];
     }
 
     /// <summary>Words with their punctuation removed; a word that is all punctuation goes.</summary>

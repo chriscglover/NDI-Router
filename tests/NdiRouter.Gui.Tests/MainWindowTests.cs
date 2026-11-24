@@ -388,6 +388,45 @@ public sealed class MainWindowTests : IDisposable
         label.Focus();
         Dispatcher.UIThread.RunJobs();
         Assert.Equal("OTHER (Feed)", vm.Router.GetInput(0).NdiSource);
+        Assert.Equal("Feed", vm.Router.GetInput(0).Label); // a typed source names the input too
+        Assert.Equal("Feed", label.Text);
+        Close(vm, window);
+    }
+
+    [AvaloniaFact]
+    public void Right_clicking_an_input_rows_source_box_picks_from_the_sources_found()
+    {
+        var (vm, window) = Open();
+        vm.Sources.Add("STUDIO-PC (Camera 1)");
+        vm.Sources.Add("EDIT-1 (Timeline)");
+        vm.Sources.Add("EDIT-1 (Clean Feed)");
+        SelectTab(window, "Inputs");
+
+        ContextMenu? menu = null;
+        using var watch = MenuBase.OpenedEvent.AddClassHandler<ContextMenu>((m, _) => menu = m);
+
+        // A real right-click inside row 2's source box
+        var box = window.GetVisualDescendants().OfType<AutoCompleteBox>().ElementAt(1);
+        var point = box.TranslatePoint(new Point(20, box.Bounds.Height / 2), window)!.Value;
+        window.MouseDown(point, MouseButton.Right);
+        window.MouseUp(point, MouseButton.Right);
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.NotNull(menu);
+        var headers = menu!.Items.OfType<MenuItem>().Select(i => (string?)i.Header).ToList();
+        Assert.Equal(new[] { "Cut", "Copy", "Paste", "Assign NDI source" }, headers.Take(4)); // the box's own items kept
+        var assign = menu.Items.OfType<MenuItem>().Single(i => (string?)i.Header == "Assign NDI source");
+        var machines = assign.Items.OfType<MenuItem>().ToList();
+        Assert.Equal(new[] { "STUDIO-PC", "EDIT-1" }, machines.Select(m => (string?)m.Header));
+        Assert.Equal(new[] { "Timeline", "Clean Feed" }, machines[1].Items.OfType<MenuItem>().Select(i => (string?)i.Header));
+
+        machines[1].Items.OfType<MenuItem>().First().RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(MenuItem.ClickEvent));
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Equal("EDIT-1 (Timeline)", vm.Router.GetInput(1).NdiSource);
+        Assert.Equal("EDIT-1 (Timeline)", vm.InputRows[1].NdiSource);
+        Assert.Equal("Timeline", vm.InputRows[1].Label);      // was "Camera 2"
+        Assert.Equal("Timeline", vm.InputRows[1].Name8Generated);
         Close(vm, window);
     }
 

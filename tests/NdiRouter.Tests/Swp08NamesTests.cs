@@ -20,6 +20,10 @@ public class Swp08NamesTests
     [InlineData("Studio Camera 1", 12, "Std Camera 1")]
     [InlineData("Studio Camera 1", 4, "SCm1")]
     [InlineData("Cam 3 10", 6, "Cm3 10")] // two numbers are never run together
+    [InlineData("NVIDIA GeForce RTX 2070 SUPER 1", 4, "NGR1")]
+    [InlineData("NVIDIA GeForce RTX 2070 SUPER 1", 8, "NGR1")] // not "NGR20701", nor "NGR207 1"
+    [InlineData("NVIDIA GeForce RTX 2070 SUPER 1", 12, "NGFRT2070SP1")]
+    [InlineData("NVIDIA GeForce RTX 2070 SUPER 1", 9, "NGR2070S1")]
     public void Labels_are_abbreviated_to_fit(string label, int length, string expected)
     {
         Assert.Equal(expected, Swp08Names.Generate(label, length));

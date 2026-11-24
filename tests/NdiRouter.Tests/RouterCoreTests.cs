@@ -59,6 +59,44 @@ public class RouterCoreTests
         Assert.All(ndi.Created, o => Assert.Null(o.Source));
     }
 
+    [Theory]
+    [InlineData("")]
+    [InlineData("Input 4")]
+    [InlineData("8")]
+    [InlineData("Cam 4")]
+    public void Assigning_a_source_labels_the_input_with_the_sources_name(string label)
+    {
+        var ndi = new FakeNdi();
+        using var router = TestRouter.Create(ndi);
+        router.UpdateInput(3, i => i.Label = label);
+
+        router.AssignSource(3, "THEBEAST (NVIDIA GeForce RTX 2070 SUPER 1)");
+
+        Assert.Equal("NVIDIA GeForce RTX 2070 SUPER 1", router.GetInput(3).Label);
+        Assert.Equal("THEBEAST (NVIDIA GeForce RTX 2070 SUPER 1)", router.GetInput(3).NdiSource);
+    }
+
+    [Fact]
+    public void A_typed_label_stays_until_the_source_is_changed_or_unassigned()
+    {
+        var ndi = new FakeNdi();
+        using var router = TestRouter.Create(ndi);
+
+        router.AssignSource(3, "THEBEAST (DistroAV NDI Output (Back Door))");
+        Assert.Equal("DistroAV NDI Output (Back Door)", router.GetInput(3).Label); // the outer brackets only
+
+        router.UpdateInput(3, i => i.Label = "Back Door");
+        router.AssignSource(3, "THEBEAST (DistroAV NDI Output (Back Door))"); // the same one again
+        Assert.Equal("Back Door", router.GetInput(3).Label);
+
+        router.AssignSource(3, "EDIT-1 (Timeline)");
+        Assert.Equal("Timeline", router.GetInput(3).Label);
+
+        router.AssignSource(3, string.Empty);
+        Assert.Equal("Input 4", router.GetInput(3).Label);
+        Assert.Equal(string.Empty, router.GetInput(3).NdiSource);
+    }
+
     [Fact]
     public void Routing_points_the_ndi_output_at_the_inputs_source_and_raises_an_event()
     {

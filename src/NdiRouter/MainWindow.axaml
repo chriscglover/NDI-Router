@@ -176,7 +176,7 @@
               <Button Content="Generate all SW-P-08 names from labels" Command="{Binding GenerateAllNamesCommand}"
                       CommandParameter="inputs" />
               <TextBlock Classes="hint" VerticalAlignment="Center" MaxWidth="900"
-                         Text="Input n is SW-P-08 source n-1. Grey names are generated from the label and follow it; type over one to fix it, clear it to go back. Right-click a row for more." />
+                         Text="Input n is SW-P-08 source n-1. Grey names are generated from the label and follow it; type over one to fix it, clear it to go back. Right-click a row to pick an NDI source from those found, and more." />
             </StackPanel>
             <Grid DockPanel.Dock="Top" ColumnDefinitions="44,2*,70,110,158,3*,96" Margin="8,0,24,4">
               <TextBlock Grid.Column="0" Text="In" Classes="hint" />
@@ -188,15 +188,11 @@
               <TextBlock Grid.Column="6" Text="Status" Classes="hint" />
             </Grid>
             <ScrollViewer>
-              <ItemsControl ItemsSource="{Binding InputRows}">
+              <!-- The row's right-click menu is built in code (OnInputRowContextRequested), so it can list the sources found -->
+              <ItemsControl x:Name="InputRowsList" ItemsSource="{Binding InputRows}">
                 <ItemsControl.ItemTemplate>
                   <DataTemplate x:DataType="vm:InputRowViewModel">
                     <Grid Classes="row" ColumnDefinitions="44,2*,70,110,158,3*,96" Margin="8,2,8,2" Background="Transparent">
-                      <Grid.ContextMenu>
-                        <ContextMenu>
-                          <MenuItem Header="Generate SW-P-08 names from label" Command="{Binding GenerateNamesCommand}" />
-                        </ContextMenu>
-                      </Grid.ContextMenu>
                       <TextBlock Grid.Column="0" Text="{Binding Number}" VerticalAlignment="Center" />
                       <TextBox Grid.Column="1" Text="{Binding Label, UpdateSourceTrigger=LostFocus}" />
                       <TextBox Grid.Column="2" Text="{Binding Name4, UpdateSourceTrigger=LostFocus}"
@@ -207,7 +203,14 @@
                                Watermark="{Binding Name12Generated}" MaxLength="12" Classes="mono" />
                       <AutoCompleteBox Grid.Column="5" Text="{Binding NdiSource, UpdateSourceTrigger=LostFocus}"
                                        ItemsSource="{Binding Sources}" FilterMode="Contains" MinimumPrefixLength="0"
-                                       Watermark="Type or pick an NDI source" />
+                                       Watermark="Type a source, or right-click to pick one">
+                        <AutoCompleteBox.Styles>
+                          <!-- Right-click goes to the row's menu instead, which adds Cut/Copy/Paste to the sources -->
+                          <Style Selector="TextBox">
+                            <Setter Property="ContextFlyout" Value="{x:Null}" />
+                          </Style>
+                        </AutoCompleteBox.Styles>
+                      </AutoCompleteBox>
                       <Border Grid.Column="6" CornerRadius="10" Padding="10,2" HorizontalAlignment="Left"
                               VerticalAlignment="Center" BorderBrush="{Binding StatusBrush}" BorderThickness="1">
                         <TextBlock Text="{Binding Status}" Foreground="{Binding StatusBrush}" FontSize="12" />

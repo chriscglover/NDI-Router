@@ -121,7 +121,11 @@ their receiver counts.
 The **Inputs** and **Outputs** tabs show the same router as editable tables, which is quicker for
 setting up a large one. An edit takes effect when you leave the field, not on every keystroke, so
 typing a source name does not re-route the outputs on that input letter by letter. The NDI source
-box suggests the sources on the network as you type. The Outputs table also previews each
+box suggests the sources on the network as you type; right-click a row (or the box) to pick one of
+the sources found, listed by machine, or to unassign it. Assigning a source, picked or typed, sets
+the input's label to the source's name (the part in brackets); you can change it afterwards, and it
+is only replaced when the source changes. Unassigning puts back *Input n*. The SW-P-08 names are
+generated from the label. The Outputs table also previews each
 output's UMD text.
 
 The **Setup** tab sets the number of inputs (up to 1000), outputs (up to 256) and presets, the NDI
@@ -290,6 +294,14 @@ Checked against SW-P-88 Issue 4b itself:
 - TSL UMD: [TSL UMD Protocol](https://tslproducts.com/wp-content/uploads/TSL-UMD-protocol.pdf)
 
 ## Version history
+
+### 1.1.1
+
+Right-click an Inputs row, or inside its NDI source box (alongside Cut, Copy and Paste), to pick
+from the sources found, listed by machine. Assigning a source, picked or typed, now sets the
+input's label to the source's name; it can still be changed, and unassigning puts back *Input n*.
+Generated SW-P-08 names no longer run two numbers together when cut short ("NGR20701" for
+"NVIDIA GeForce RTX 2070 SUPER 1" is now "NGR1").
 
 ### 1.1.0
 
