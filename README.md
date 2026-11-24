@@ -30,7 +30,7 @@ one place, [Directory.Build.props](Directory.Build.props), which every project s
 ## Requirements
 
 - Windows 10/11 x64.
-- The NDI 6 (or 5) runtime, from [ndi.tv](https://ndi.tv). The application finds it via
+- The NDI 6 (or 5) runtime, from [ndi.video](https://ndi.video). The application finds it via
   `NDI_RUNTIME_DIR_V6` (or `_V5`). Without it the application still runs and still answers
   SW-P-08 and TSL, but publishes nothing on the network and has no preview. The status lights and
   log say which applies.
@@ -284,7 +284,7 @@ Checked against SW-P-88 Issue 4b itself:
 
 ## References
 
-- NDI SDK and runtime (the NDI API components this application uses): [ndi.tv](https://ndi.tv)
+- NDI SDK and runtime (the NDI API components this application uses): [ndi.video](https://ndi.video)
 - SW-P-08:
   [Router Technical Reference Guide](https://community.grassvalley.com/support/s/productmanualmaster/a2NPo000002lwz0MAA/router-technical-reference-guide)
 - TSL UMD: [TSL UMD Protocol](https://tslproducts.com/wp-content/uploads/TSL-UMD-protocol.pdf)
