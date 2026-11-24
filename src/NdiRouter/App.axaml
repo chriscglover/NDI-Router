@@ -73,6 +73,26 @@
       <Setter Property="Opacity" Value="1" />
     </Style>
 
+    <!-- The router panel's Take button: red, like a tally, while there is something to take -->
+    <Style Selector="Button.take">
+      <Setter Property="FontSize" Value="20" />
+      <Setter Property="FontWeight" Value="Bold" />
+      <Setter Property="HorizontalContentAlignment" Value="Center" />
+      <Setter Property="VerticalContentAlignment" Value="Center" />
+    </Style>
+    <Style Selector="Button.take:not(:disabled) /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="#C62828" />
+      <Setter Property="Foreground" Value="White" />
+    </Style>
+    <Style Selector="Button.take:pointerover:not(:disabled) /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="#E53935" />
+      <Setter Property="Foreground" Value="White" />
+    </Style>
+    <Style Selector="Button.take:pressed:not(:disabled) /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="#962020" />
+      <Setter Property="Foreground" Value="White" />
+    </Style>
+
     <!-- Table rows: tighter text boxes -->
     <Style Selector="Grid.row TextBox">
       <Setter Property="MinHeight" Value="30" />

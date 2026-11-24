@@ -76,7 +76,7 @@ internal sealed class WindowDialogs(Window owner) : IDialogs
             AllowMultiple = false,
             FileTypeFilter = new[]
             {
-                new FilePickerFileType("NDI Router settings") { Patterns = new[] { "*.json" } },
+                new FilePickerFileType("NDI Tools router settings") { Patterns = new[] { "*.json" } },
                 FilePickerFileTypes.All
             }
         };

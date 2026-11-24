@@ -44,14 +44,21 @@ public sealed partial class TileViewModel(TileKind kind, int index) : Observable
     [ObservableProperty] private IBrush _borderBrush = new SolidColorBrush(Palette.TileBorder);
     [ObservableProperty] private Thickness _borderThickness = new(1);
     [ObservableProperty] private bool _isMixed;
+
+    /// <summary>On the preview monitor; marked with a small PVW badge.</summary>
+    [ObservableProperty] private bool _isPreviewed;
     [ObservableProperty] private double _fontSize = 14.5;
     [ObservableProperty] private FontWeight _fontWeight = FontWeight.Normal;
     [ObservableProperty] private FontStyle _fontStyle = FontStyle.Normal;
     [ObservableProperty] private TextDecorationCollection? _textDecorations;
 
     /// <summary>Works out the tile's look from the button style and its routing state.</summary>
-    public void Update(string title, string subtitle, ButtonStyle style, bool selected, TileState state, bool dimmed, bool armed)
+    /// <param name="preselected">A source picked for the next Take: shown with a yellow edge.</param>
+    public void Update(string title, string subtitle, ButtonStyle style, bool selected, TileState state, bool dimmed, bool armed,
+        bool preselected = false, bool previewed = false)
     {
+        IsPreviewed = previewed;
+        selected |= preselected;
         Title = title;
         Subtitle = subtitle;
 
@@ -67,6 +74,7 @@ public sealed partial class TileViewModel(TileKind kind, int index) : Observable
         SetBrush(SubForeground, Palette.Blend(fore, back, 0.35), b => SubForeground = b);
 
         var edge = armed ? Palette.Armed
+            : preselected ? Palette.Preselected
             : selected ? Palette.Selected
             : state != TileState.Normal && custom is not null ? Palette.Active
             : state == TileState.Active ? Palette.Blend(Palette.Active, Colors.White, 0.25)

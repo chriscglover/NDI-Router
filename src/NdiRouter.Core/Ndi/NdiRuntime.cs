@@ -77,6 +77,9 @@ public sealed class NdiRuntime : INdiOutputFactory
 
     public INdiOutput CreateOutput(string name, string groups) =>
         IsAvailable ? new NdiRoutingOutput(name, groups) : new OfflineOutput(name);
+
+    /// <summary>A preview monitor, or null without an NDI runtime.</summary>
+    public INdiPreview? CreatePreview(string receiverName) => IsAvailable ? new NdiPreview(receiverName) : null;
 }
 
 /// <summary>An NDI routing instance: an advertised source that forwards receivers to another source.</summary>

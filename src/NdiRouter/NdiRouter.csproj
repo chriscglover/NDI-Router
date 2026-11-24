@@ -8,6 +8,8 @@
     <Description>NDI router with Pro-Bel SW-P-08 control and TSL UMD output</Description>
     <ApplicationIcon>../../assets/NdiRouter.ico</ApplicationIcon>
     <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
+    <!-- Copying preview frames into the monitor's bitmap -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <!-- Bindings are checked when building, so a typo in XAML is a build error, not a silent blank -->
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
   </PropertyGroup>

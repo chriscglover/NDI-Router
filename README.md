@@ -2,16 +2,15 @@
 
 # NDI Router (SW-P-08 / TSL)
 
-A Windows NDI router that does what NDI Router from NDI Tools does, and adds:
+A Windows NDI router with a router control panel and a live preview monitor, plus:
 
-- **Pro-Bel SW-P-08 control over TCP**, so any broadcast control system, panel or Bitfocus
-  Companion can route it like a hardware router.
+- **Pro-Bel SW-P-08 control over TCP**, so any broadcast control system or panel can route it
+  like a hardware router.
 - **TSL UMD output** (3.1, 4.0 or 5.0, UDP or TCP), so a multiviewer can show what each output
   is carrying.
 
 Each output is an NDI *routing* source. A receiver that watches it is switched between NDI
-sources by the NDI runtime itself, with no decode or re-encode and no extra latency, exactly as
-with NDI Router.
+sources by the NDI runtime itself, with no decode or re-encode and no extra latency.
 
 ## Download
 
@@ -31,10 +30,10 @@ one place, [Directory.Build.props](Directory.Build.props), which every project s
 ## Requirements
 
 - Windows 10/11 x64.
-- The NDI 6 (or 5) runtime. It is installed with [NDI Tools](https://ndi.video/tools/), or on
-  its own with the NDI runtime installer. The application finds it via `NDI_RUNTIME_DIR_V6`.
-  Without it the application still runs and still answers SW-P-08 and TSL, but publishes nothing
-  on the network. The status lights and log say which applies.
+- The NDI 6 (or 5) runtime, from [ndi.tv](https://ndi.tv). The application finds it via
+  `NDI_RUNTIME_DIR_V6` (or `_V5`). Without it the application still runs and still answers
+  SW-P-08 and TSL, but publishes nothing on the network and has no preview. The status lights and
+  log say which applies.
 - To build: the .NET 10 SDK.
 
 ## Build and run
@@ -42,7 +41,7 @@ one place, [Directory.Build.props](Directory.Build.props), which every project s
 ```powershell
 dotnet build
 dotnet run --project src/NdiRouter
-dotnet test            # 92 tests; two use the real NDI runtime when it is installed
+dotnet test            # 100 tests; three use the real NDI runtime when it is installed
 ```
 
 The GUI tests run headless and never touch the network or the saved settings. Set
@@ -63,11 +62,10 @@ dotnet publish src/NdiRouter -c Release -r win-x64 --self-contained false `
 ```
 
 Each leaves one `NdiRouter.exe`. The property is `IncludeNativeLibrariesForSelfExtract`; MSBuild
-silently ignores a misspelling, and then Avalonia's native libraries (Skia, HarfBuzz, ANGLE) are
-left as loose DLLs beside the executable.
+silently ignores a misspelling, and then the window library's native DLLs (Skia, HarfBuzz, ANGLE)
+are left loose beside the executable.
 
-The window is built with [Avalonia](https://avaloniaui.net/) (Fluent theme, dark) and
-CommunityToolkit.Mvvm, as [Newfor Test](https://github.com/chriscglover/NewforTest) is. The router
+The window uses the Avalonia UI library (Fluent theme, dark) and CommunityToolkit.Mvvm. The router
 itself - NDI, SW-P-08, TSL and settings, in `NdiRouter.Core` - uses no packages at all.
 
 ## The router
@@ -76,15 +74,24 @@ Along the top of the window are three status lights: NDI (runtime and sources fo
 (listening and controllers connected) and TSL (sending). The log runs along the bottom; drag the
 divider to resize it.
 
-The **Router** tab is laid out like NDI Router: outputs along the top, inputs beneath, presets at
-the bottom.
+The **Router** tab has the sources on the left, the destinations on the right, and the preview
+monitor with **Take** and **Undo** between them. Presets run along the bottom.
 
-- **Route:** click an output to select it, then click an input. Ctrl+click selects several
-  outputs, which are then routed together. With several outputs selected, an input fed to all of
-  them is filled red, and one fed to only some has a dashed red edge.
-- **Clear output** takes the selected outputs off any source.
-- **Presets:** press *Store preset*, then a preset, to save every output's route in it. Click a
-  preset to recall it.
+- **Route:** click a source to pick it (yellow edge), click a destination to select it, then press
+  **Take**. Either can be clicked first. Ctrl+click selects several destinations, which are then
+  routed together. The line above Take says what it will do. Clicking the picked source again
+  un-picks it.
+- **Double-click a destination** to take the picked source straight to it (and to any other
+  destinations already selected with Ctrl). With no source picked, a double-click just selects.
+- **Keys** (Router tab only, so they never interfere with typing in the tables): **Enter** takes,
+  **Ctrl+Z** undoes, **Esc** un-picks the source.
+- **Tally:** with several destinations selected, a source fed to all of them is filled red, and one
+  fed to only some has a dashed red edge.
+- **Undo** puts back the routes the last Take, Clear or preset recall changed. It remembers the
+  last 50, and its tooltip and the line under it say what the next Undo will put back.
+- **Clear destination** takes the selected destinations off any source.
+- **Presets:** press *Store preset*, then a preset, to save every destination's route in it. Click
+  a preset to recall it.
 - **Right-click** any button to set it up: assign an NDI source to an input (sources are listed
   by machine), rename, set the SW-P-08 names, change the NDI output name or UMD address, or style
   the button (background and text colour, size, bold/italic/underline).
@@ -96,6 +103,21 @@ it carries and how many NDI receivers are watching it.
 Re-assigning an input's NDI source re-routes every output on that input, as re-plugging a
 hardware router's input would.
 
+### Preview
+
+Clicking a source shows that source on the monitor. Clicking a destination shows whatever is
+routed to it, and keeps following it: when the destination is re-routed, from the panel, a preset
+or a SW-P-08 controller, the monitor switches with it. A green **PVW** badge marks the button on
+the monitor. Under the picture are its size, frame rate and NDI source, or why there is no
+picture (no source assigned, nothing routed, no video).
+
+The monitor watches the NDI source directly, through one receiver named *NDI Router Preview*.
+It uses the source's low-bandwidth stream, so previewing costs much less network than a
+full-quality connection. It never connects to the router's own outputs, so it does not add to
+their receiver counts.
+
+### Inputs, Outputs and Setup
+
 The **Inputs** and **Outputs** tabs show the same router as editable tables, which is quicker for
 setting up a large one. An edit takes effect when you leave the field, not on every keystroke, so
 typing a source name does not re-route the outputs on that input letter by letter. The NDI source
@@ -105,21 +127,21 @@ output's UMD text.
 The **Setup** tab sets the number of inputs (up to 1000), outputs (up to 256) and presets, the NDI
 discovery groups and extra IPs, and the groups outputs are published in.
 
-### Coming from NDI Router
+### Importing a layout
 
-**Import from NDI Router...** (top right, or on the Setup tab) reads NDI Router's saved layout
-(`%LOCALAPPDATA%\NDI\NDI_Router\Application.NDI.Router.json`). It brings across the inputs with
-their labels and sources, the outputs with their labels, routing names and current routes, the
-button styles and the preset names. NDI Router's file does not expose preset contents.
-
-Imported outputs keep NDI Router's names (`Router Dest 1`...), so do not run both applications on
-one machine at the same time: they would publish the same NDI sources. The import warns if NDI
-Router is running. New outputs created here are named `Router Out n`, so they never clash.
+**Import from NDI Tools...** (top right, or on the Setup tab) reads the layout saved by the NDI
+Tools router (`%LOCALAPPDATA%\NDI\NDI_Router\Application.NDI.Router.json`): inputs with their labels and
+sources, outputs with their labels, routing names and current routes, button styles and preset
+names. Preset contents are not in that file. Imported outputs keep their NDI names, so the import
+warns if the application that saved them is still running and publishing the same names. New
+outputs created here are named `Router Out n`.
 
 ## SW-P-08 control
 
-Listens on TCP port **8910** by default, which is Companion's SW-P-08 default, on all interfaces.
-Each TCP connection is an independent SW-P-08 link.
+Listens on TCP port **8910** by default, on all interfaces. Each TCP connection is an independent
+SW-P-08 link. The protocol is described in the
+[Router Technical Reference Guide](https://community.grassvalley.com/support/s/productmanualmaster/a2NPo000002lwz0MAA/router-technical-reference-guide)
+(SW-P-88).
 
 | Wire | Router |
 |---|---|
@@ -148,6 +170,10 @@ A route change from *anywhere* (another controller, the panel, a preset, the out
 announced with CROSSPOINT CONNECTED on every link, so every controller and panel stays in step.
 A controller that uses an extended command is answered with extended messages from then on.
 
+A controller that sends PROTOCOL IMPLEMENTATION (0x61) on connecting is answered with 0x62, listing
+every command above. Controllers that wait for that reply before asking for names and tallies then
+go on to read them.
+
 **Link layer:** every well-formed message is ACKed at once and a corrupt one NAKed. Messages to
 a controller go one at a time, each waiting up to the ACK timeout (1 s) and resent on NAK or
 timeout. As SW-P-88 7.2.2 has a Pro-Bel controller do, each is re-sent up to 5 times (6 sends;
@@ -159,10 +185,9 @@ The listener holds its port exclusively, so a second copy of the application, or
 already on 8910, fails loudly instead of silently sharing the port.
 
 **Names.** Name commands are not in SW-P-88 Issue 4b: they are SW-P-08 extensions (SW-P-02 has
-none), implemented here as deployed routers and Companion use them. Controllers ask for names at
-one length, 4, 8 or 12 characters, and show that
-length on their buttons. So every input and output has three names, each generated from its label
-unless one is typed in:
+none), implemented here as deployed routers and controllers use them. Controllers ask for names at
+one length, 4, 8 or 12 characters, and show that length on their buttons. So every input and
+output has three names, each generated from its label unless one is typed in:
 
 | Label | 4 | 8 | 12 |
 |---|---|---|---|
@@ -179,14 +204,8 @@ what would have been generated, to go back to generating it. *Generate SW-P-08 n
 (toolbar or right-click; selected rows or all) puts typed names back to generated. On the panel,
 right-click a button for *SW-P-08 names...*. Names are printable ASCII and space padded.
 
-The sources disagree on 16 and 32 characters. Issue 4b has no name commands, and swp08emu and
-probel-pangolin define only 4, 8 and 12. Companion reads length codes 3 and 4 as 16 and 32, citing
-"SW-P-08 Issue 32", which has not been checked here. If a controller does ask for 16 or 32, it is
-answered with the label fitted to that length. Nothing is stored or edited for those lengths.
-
-**Companion:** add the *Generic: SW-P-08* module, set the host and port 8910, and leave
-"Request supported commands on connection" on. The router answers it, and Companion then reads
-names and tallies.
+Some controllers also ask for 16 or 32 character names (length codes 3 and 4). These are answered
+with the label fitted to that length; nothing is stored or edited for those lengths.
 
 **Not implemented:** protect, salvos (connect-on-go), single-name requests (0x65/0x67), UMD label
 requests (0x68) and SW-P-02. Serial (RS-422) links are not supported, only TCP.
@@ -195,7 +214,8 @@ requests (0x68) and SW-P-02. Serial (RS-422) links are not supported, only TCP.
 
 Each output has a UMD address (by default output *n* is address *n*). The display shows what the
 output is carrying, using the **Routed** template, or the **Cleared** template when nothing is
-routed.
+routed. The protocol is described in
+[TSL UMD Protocol](https://tslproducts.com/wp-content/uploads/TSL-UMD-protocol.pdf).
 
 | Token | Value |
 |---|---|
@@ -212,11 +232,10 @@ quoted alternative is literal text: `{input.label|"NO SOURCE"}`.
 TSL 3.1 and 4.0 carry 16 characters. Longer text is truncated, cut to its end, or squeezed by
 dropping vowels (digits are always kept). Lamps can be driven from whether the output is routed.
 
-Sending works as in [NMOS UMD](https://github.com/chriscglover/NMOS-UMD). A changed display is
-sent at once. Every display is also refreshed on the repeat interval, with packets spaced evenly
-rather than sent in a burst, because a TCP receiver that reads one message per read (Companion's
-does) would otherwise drop all but the first. A destination that is not listening yet is retried
-every 5 seconds.
+A changed display is sent at once. Every display is also refreshed on the repeat interval, with
+packets spaced evenly rather than sent in a burst, because some TCP receivers read only one
+message per read and would otherwise drop all but the first. A destination that is not listening
+yet is retried every 5 seconds.
 
 ## Settings
 
@@ -234,29 +253,25 @@ overwritten.
 
 | Path | Contents |
 |---|---|
-| [src/NdiRouter.Core/Ndi](src/NdiRouter.Core/Ndi) | NDI runtime loading, P/Invoke, routing outputs, source discovery |
+| [src/NdiRouter.Core/Ndi](src/NdiRouter.Core/Ndi) | NDI runtime loading, P/Invoke, routing outputs, source discovery, the preview receiver |
 | [src/NdiRouter.Core/Core](src/NdiRouter.Core/Core) | The router model and state (`RouterCore`), SW-P-08 names, and `RouterHost` which runs everything |
 | [src/NdiRouter.Core/Swp08](src/NdiRouter.Core/Swp08) | SW-P-08 framing, messages and the TCP server |
 | [src/NdiRouter.Core/Tsl](src/NdiRouter.Core/Tsl), [Net](src/NdiRouter.Core/Net), [Umd](src/NdiRouter.Core/Umd) | TSL packets and transports, UMD templates and the paced sender |
-| [src/NdiRouter.Core/Config](src/NdiRouter.Core/Config) | Saved settings and the NDI Router importer |
-| [src/NdiRouter](src/NdiRouter) | The Avalonia window ([MainWindow.axaml](src/NdiRouter/MainWindow.axaml)), its view models and dialogs |
+| [src/NdiRouter.Core/Config](src/NdiRouter.Core/Config) | Saved settings and the layout importer |
+| [src/NdiRouter](src/NdiRouter) | The window ([MainWindow.axaml](src/NdiRouter/MainWindow.axaml)), its view models and dialogs |
 | [tests/NdiRouter.Tests](tests/NdiRouter.Tests) | Router, SW-P-08, TSL, names and NDI tests |
 | [tests/NdiRouter.Gui.Tests](tests/NdiRouter.Gui.Tests) | Headless window tests |
 | [tools/IconGenerator](tools/IconGenerator) | Draws [assets/NdiRouter.ico](assets) (16-256 px): `dotnet run --project tools/IconGenerator -- assets` |
 
-## Testing and provenance
+## Testing
 
 - The SW-P-08 framing and crosspoint encoding are tested byte for byte against the worked examples
-  in the SW-P-88 Issue 4b specification (Appendix 1), as in
-  [swp08emu](https://github.com/chriscglover/swp08emu). Extended, name, tally-dump, NAMES UPDATED
-  and protocol-implementation layouts follow the MIT-licensed
-  [Companion SW-P-08 module](https://github.com/bitfocus/companion-module-generic-swp08). The
-  server is tested over real TCP sockets, and was also checked live against swp08emu's own
-  protocol decoder.
-- The NDI tests publish two test sources, route between them, and confirm that a receiver
-  watching a router output receives whichever is routed, without reconnecting.
-- The TSL packet code comes from [TSL UMD Tester](https://github.com/chriscglover/TSL-UMD-Tester)
-  via NMOS UMD.
+  in the SW-P-88 Issue 4b specification (Appendix 1). The server is tested over real TCP sockets.
+- The NDI tests publish test sources, route between them, and confirm that a receiver watching a
+  router output receives whichever is routed, without reconnecting. They also confirm that the
+  preview receiver shows a source's picture and follows a change of source.
+- The window tests cover picking and taking, double-click take, the keyboard shortcuts, Undo, and
+  what the preview monitor is pointed at.
 
 Checked against SW-P-88 Issue 4b itself:
 
@@ -267,14 +282,30 @@ Checked against SW-P-88 Issue 4b itself:
   from idle. Which value means active, and the second byte, come from SW-P-02 Issue 37's definition
   of the same message: bit 1 set = active. The router answers `02 00` (master, active).
 
+## References
+
+- NDI SDK and runtime (the NDI API components this application uses): [ndi.tv](https://ndi.tv)
+- SW-P-08:
+  [Router Technical Reference Guide](https://community.grassvalley.com/support/s/productmanualmaster/a2NPo000002lwz0MAA/router-technical-reference-guide)
+- TSL UMD: [TSL UMD Protocol](https://tslproducts.com/wp-content/uploads/TSL-UMD-protocol.pdf)
+
 ## Version history
+
+### 1.1.0
+
+The Router tab is rearranged: sources on the left, destinations on the right, and a preview
+monitor with Take and Undo in the middle. A source is now picked and then taken, instead of routed
+on the click; double-clicking a destination takes straight to it. Undo puts back the last 50
+takes, clears and preset recalls. Enter, Ctrl+Z and Esc take, undo and un-pick. The preview
+monitor shows a clicked source, or follows whatever a clicked destination carries. The import
+button is now *Import from NDI Tools...*.
 
 ### 1.0.0
 
-First release: NDI Router's inputs, outputs and presets with NDI routing; SW-P-08 control over TCP
-(normal and extended crosspoints, tally dumps, 4, 8 and 12 character names, NAMES UPDATED,
-protocol implementation and dual controller status); TSL UMD 3.1, 4.0 and 5.0 output; import from
-NDI Router; an Avalonia window.
+First release: inputs, outputs and presets with NDI routing; SW-P-08 control over TCP (normal and
+extended crosspoints, tally dumps, 4, 8 and 12 character names, NAMES UPDATED, protocol
+implementation and dual controller status); TSL UMD 3.1, 4.0 and 5.0 output; layout import; the
+control window.
 
 ## Licence
 

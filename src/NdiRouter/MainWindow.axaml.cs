@@ -22,19 +22,67 @@ public partial class MainWindow : Window
             list.Tapped += OnTileTapped;
             list.AddHandler(ContextRequestedEvent, OnTileContextRequested, RoutingStrategies.Bubble);
         }
+
+        OutputTiles.DoubleTapped += OnOutputDoubleTapped;
+
+        // Tunnel, so the shortcuts win over whichever panel button has focus (Enter would click it)
+        AddHandler(KeyDownEvent, OnPanelKeyDown, RoutingStrategies.Tunnel);
+    }
+
+    /// <summary>
+    /// Router tab shortcuts: Enter takes, Ctrl+Z undoes, Escape un-picks the source. Nowhere else,
+    /// and never while typing, so Enter and Ctrl+Z keep their usual meaning in the tables.
+    /// </summary>
+    private void OnPanelKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (_viewModel is null || !RouterTab.IsSelected) return;
+        if (e.Source is TextBox or AutoCompleteBox or NumericUpDown or ComboBox) return;
+
+        switch (e.Key, e.KeyModifiers)
+        {
+            case (Key.Enter, KeyModifiers.None):
+                if (_viewModel.TakeCommand.CanExecute(null)) _viewModel.TakeCommand.Execute(null);
+                e.Handled = true;
+                break;
+            case (Key.Z, KeyModifiers.Control):
+                if (_viewModel.UndoCommand.CanExecute(null)) _viewModel.UndoCommand.Execute(null);
+                e.Handled = true;
+                break;
+            case (Key.Escape, KeyModifiers.None):
+                _viewModel.CancelPick();
+                e.Handled = true;
+                break;
+        }
+    }
+
+    /// <summary>The second click of a double-click: take the picked source to this destination.</summary>
+    private void OnOutputDoubleTapped(object? sender, TappedEventArgs e)
+    {
+        if (_viewModel is null || TileFrom(e) is not { Kind: TileKind.Output } tile) return;
+        _viewModel.TakeTo(tile.Index);
+        e.Handled = true;
     }
 
     protected override void OnDataContextChanged(EventArgs e)
     {
         base.OnDataContextChanged(e);
 
-        if (_viewModel is not null) _viewModel.Log.CollectionChanged -= OnLogChanged;
+        if (_viewModel is not null)
+        {
+            _viewModel.Log.CollectionChanged -= OnLogChanged;
+            _viewModel.Preview.PictureUpdated -= OnPictureUpdated;
+        }
+
         _viewModel = DataContext as MainViewModel;
         if (_viewModel is null) return;
 
         _viewModel.Dialogs = new WindowDialogs(this);
         _viewModel.Log.CollectionChanged += OnLogChanged;
+        _viewModel.Preview.PictureUpdated += OnPictureUpdated;
     }
+
+    /// <summary>The bitmap is reused frame to frame, so the image has to be told its pixels changed.</summary>
+    private void OnPictureUpdated() => PreviewImage.InvalidateVisual();
 
     /// <summary>Keeps the newest log line in view.</summary>
     private void OnLogChanged(object? sender, NotifyCollectionChangedEventArgs e)
@@ -55,7 +103,7 @@ public partial class MainWindow : Window
                 _viewModel.SelectOutput(tile.Index, additive: e.KeyModifiers.HasFlag(KeyModifiers.Control));
                 break;
             case TileKind.Input:
-                _viewModel.RouteInputCommand.Execute(tile.Index);
+                _viewModel.SelectInput(tile.Index);
                 break;
             case TileKind.Preset:
                 _viewModel.PressPresetCommand.Execute(tile.Index);
@@ -98,7 +146,7 @@ public partial class MainWindow : Window
         Item("UMD address...", () => _ = vm.SetUmdAddressAsync(index)),
         Item("Style...", () => _ = vm.StyleOutputAsync(index)),
         new Separator(),
-        Item("Clear route", () => vm.Router.Route(index, null, "panel"))
+        Item("Clear route", () => vm.ClearOutput(index))
     };
 
     private static List<Control> InputMenu(MainViewModel vm, int index)

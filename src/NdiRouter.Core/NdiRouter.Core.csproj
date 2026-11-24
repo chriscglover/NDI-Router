@@ -5,6 +5,8 @@
 
   <PropertyGroup>
     <RootNamespace>NdiRouter</RootNamespace>
+    <!-- Copying preview frames out of NDI's buffers -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
   <ItemGroup>

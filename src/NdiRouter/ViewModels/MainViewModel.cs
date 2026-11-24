@@ -22,11 +22,18 @@ namespace NdiRouter.Gui.ViewModels;
 public sealed partial class MainViewModel : ObservableObject, IDisposable
 {
     private const int MaxLogLines = 3000;
+    private const int MaxUndo = 50;
+    private const string DefaultHint =
+        "Pick a source and destinations (Ctrl+click for several), then Take (Enter), or double-click a destination to take straight to it. " +
+        "Ctrl+Z undoes, Esc un-picks. Clicking either previews it.";
 
     private readonly RouterHost _host;
     private readonly DispatcherTimer _pollTimer;
     private readonly DispatcherTimer _saveTimer;
     private readonly HashSet<int> _selected = new() { 0 };
+    private readonly List<UndoStep> _undo = new();
+    private TileKind? _previewKind;
+    private int _previewIndex;
     private HashSet<string> _online = new(StringComparer.OrdinalIgnoreCase);
     private IReadOnlyList<string> _discovered = Array.Empty<string>();
     private int[] _connections = Array.Empty<int>();
@@ -35,9 +42,11 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     private volatile bool _dirty;
     private bool _disposed;
 
-    public MainViewModel(RouterHost host)
+    /// <param name="preview">The preview monitor's receiver; made from the NDI runtime when null.</param>
+    public MainViewModel(RouterHost host, INdiPreview? preview = null)
     {
         _host = host;
+        Preview = new PreviewViewModel(preview ?? host.Ndi.CreatePreview("NDI Router Preview"));
         Swp08 = new Swp08ViewModel(host);
         Tsl = new TslViewModel(host, () => Refresh(layout: false));
         Setup = new SetupViewModel(host, AddLog);
@@ -77,6 +86,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     public Swp08ViewModel Swp08 { get; }
     public TslViewModel Tsl { get; }
     public SetupViewModel Setup { get; }
+    public PreviewViewModel Preview { get; }
 
     public ObservableCollection<TileViewModel> OutputTiles { get; } = new();
     public ObservableCollection<TileViewModel> InputTiles { get; } = new();
@@ -91,7 +101,18 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     public ObservableCollection<string> Log { get; } = new();
 
     [ObservableProperty] private bool _storeArmed;
-    [ObservableProperty] private string _panelHint = "Click an output, then an input to route it. Ctrl+click selects several outputs.";
+    [ObservableProperty] private string _panelHint = DefaultHint;
+
+    /// <summary>The source picked for the next Take, if any.</summary>
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(TakeCommand))]
+    private int? _preselected;
+
+    /// <summary>What Take will do, e.g. "Camera 2 ▶ Studio Monitor".</summary>
+    [ObservableProperty] private string _nextRoute = "Nothing to take";
+
+    /// <summary>What Undo will put back, for its tooltip and the label under it.</summary>
+    [ObservableProperty] private string _undoDescription = "Nothing to undo";
     [ObservableProperty] private string _ndiStatus = string.Empty;
     [ObservableProperty] private IBrush _ndiBrush = Palette.Off;
     [ObservableProperty] private string _swp08Status = string.Empty;
@@ -168,6 +189,9 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
         _selected.RemoveWhere(o => o >= outputs.Count);
         if (_selected.Count == 0 && outputs.Count > 0) _selected.Add(0);
+        if (Preselected >= inputs.Count) Preselected = null;
+        if (_previewKind == TileKind.Input && _previewIndex >= inputs.Count) _previewKind = null;
+        if (_previewKind == TileKind.Output && _previewIndex >= outputs.Count) _previewKind = null;
 
         // Outputs
         for (var o = 0; o < outputs.Count; o++)
@@ -176,7 +200,8 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             var source = output.Input is int i && i < inputs.Count ? inputs[i].Label : "Clear";
             var watching = o < _connections.Length && _connections[o] > 0 ? $"  ·  {_connections[o]} rx" : string.Empty;
             OutputTiles[o].Update(output.Label, "◀ " + source + watching, output.Style, _selected.Contains(o),
-                TileState.Normal, dimmed: false, armed: false);
+                TileState.Normal, dimmed: false, armed: false,
+                previewed: _previewKind == TileKind.Output && _previewIndex == o);
         }
 
         // Inputs: on air to all the selected outputs (active) or to some (mixed)
@@ -205,8 +230,14 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
                 dimmed = !online;
             }
 
-            InputTiles[i].Update(input.Label, subtitle, input.Style, selected: false, state, dimmed, armed: false);
+            InputTiles[i].Update(input.Label, subtitle, input.Style, selected: false, state, dimmed, armed: false,
+                preselected: Preselected == i, previewed: _previewKind == TileKind.Input && _previewIndex == i);
         }
+
+        NextRoute = Preselected is int next
+            ? $"{inputs[next].Label}  ▶  {string.Join(", ", _selected.Order().Select(o => outputs[o].Label))}"
+            : "Pick a source to take";
+        UpdatePreview(inputs, outputs);
 
         // Presets
         for (var p = 0; p < presets.Count; p++)
@@ -257,6 +288,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         }
 
         UpdateStatus();
+        Preview.Tick();
     }
 
     private void UpdateStatus()
@@ -293,7 +325,10 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
 
     // ------------------------------------------------------------------ panel
 
-    /// <summary>Selects an output; with <paramref name="additive"/> (Ctrl) it toggles it in or out of the selection.</summary>
+    /// <summary>
+    /// Selects a destination and puts its route on the preview monitor; with <paramref name="additive"/>
+    /// (Ctrl) it toggles it in or out of the selection.
+    /// </summary>
     public void SelectOutput(int index, bool additive)
     {
         if (additive)
@@ -307,21 +342,119 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             _selected.Add(index);
         }
 
+        _previewKind = TileKind.Output;
+        _previewIndex = index;
         Refresh(layout: false);
     }
 
     public IReadOnlyList<int> SelectedOutputs => _selected.Order().ToList();
 
-    /// <summary>Routes an input to every selected output.</summary>
-    [RelayCommand]
-    private void RouteInput(int index) => Router.Route(_selected.Order(), index, "panel");
+    /// <summary>
+    /// Picks a source for the next Take and previews it. Clicking the picked source again un-picks it.
+    /// </summary>
+    public void SelectInput(int index)
+    {
+        Preselected = Preselected == index ? null : index;
+        _previewKind = TileKind.Input;
+        _previewIndex = index;
+        Refresh(layout: false);
+    }
 
+    /// <summary>Un-picks the picked source (Escape).</summary>
+    public void CancelPick()
+    {
+        if (Preselected is null) return;
+        Preselected = null;
+        Refresh(layout: false);
+    }
+
+    /// <summary>
+    /// A double-clicked destination: takes the picked source to it, along with any other selected
+    /// destinations. With no source picked it is just selected.
+    /// </summary>
+    public void TakeTo(int output)
+    {
+        if (output < 0 || output >= Router.OutputCount) return;
+        _selected.Add(output); // the first click of a Ctrl+double-click may have toggled it out
+        _previewKind = TileKind.Output;
+        _previewIndex = output;
+
+        if (Preselected is null)
+        {
+            PanelHint = "Pick a source first, then double-click a destination to take it there.";
+            Refresh(layout: false);
+            return;
+        }
+
+        Take();
+    }
+
+    /// <summary>Routes the picked source to every selected destination.</summary>
+    [RelayCommand(CanExecute = nameof(CanTake))]
+    private void Take()
+    {
+        if (Preselected is not int input) return;
+        Preselected = null;
+        RouteUndoably(_selected.Order().ToList(), input);
+        Refresh(layout: false);
+    }
+
+    private bool CanTake() => Preselected is not null;
+
+    /// <summary>Takes the selected destinations off any source.</summary>
     [RelayCommand]
-    private void ClearSelected() => Router.Route(_selected.Order(), null, "panel");
+    private void ClearSelected() => RouteUndoably(_selected.Order().ToList(), null);
+
+    /// <summary>Takes one destination off any source (its right-click menu).</summary>
+    public void ClearOutput(int index) => RouteUndoably(new[] { index }, null);
+
+    /// <summary>Puts back the routes the last Take, Clear or preset recall changed.</summary>
+    [RelayCommand(CanExecute = nameof(CanUndo))]
+    private void Undo()
+    {
+        if (_undo.Count == 0) return;
+        var step = _undo[^1];
+        _undo.RemoveAt(_undo.Count - 1);
+
+        foreach (var (output, input) in step.Routes)
+            if (output < Router.OutputCount && (input is null || input < Router.InputCount))
+                Router.Route(output, input, "undo");
+
+        PanelHint = $"Undone: {step.Description}.";
+        UndoChanged();
+    }
+
+    private bool CanUndo() => _undo.Count > 0;
+
+    /// <summary>Routes from the panel, remembering what each destination had so Undo can put it back.</summary>
+    private void RouteUndoably(IReadOnlyList<int> outputs, int? input)
+    {
+        var before = outputs.Select(o => (Output: o, Input: Router.GetRoute(o))).Where(r => r.Input != input).ToArray();
+        Router.Route(outputs, input, "panel");
+        if (before.Length == 0) return; // nothing changed
+
+        var names = string.Join(", ", before.Select(r => Router.GetOutput(r.Output).Label));
+        Remember(new UndoStep(input is int i ? $"{Router.GetInput(i).Label} to {names}" : $"clear of {names}", before));
+    }
+
+    private void Remember(UndoStep step)
+    {
+        _undo.Add(step);
+        if (_undo.Count > MaxUndo) _undo.RemoveAt(0);
+        UndoChanged();
+    }
+
+    private void UndoChanged()
+    {
+        UndoDescription = _undo.Count > 0 ? $"Undo (Ctrl+Z): {_undo[^1].Description}" : "Nothing to undo";
+        UndoCommand.NotifyCanExecuteChanged();
+    }
+
+    private sealed record UndoStep(string Description, (int Output, int? Input)[] Routes);
 
     partial void OnStoreArmedChanged(bool value)
     {
-        PanelHint = value ? "Click a preset to store the current routes in it." : string.Empty;
+        PanelHint = value ? "Click a preset to store the current routes in it." : DefaultHint;
         Refresh(layout: false);
     }
 
@@ -334,14 +467,51 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
             Router.StorePreset(index);
             StoreArmed = false;
             PanelHint = $"Stored the current routes in \"{label}\".";
+            return;
         }
-        else if (Router.RecallPreset(index))
+
+        var before = Router.Routes();
+        if (Router.RecallPreset(index))
         {
+            var after = Router.Routes();
+            var changed = before.Select((input, o) => (Output: o, Input: input))
+                .Where(r => r.Output < after.Length && after[r.Output] != r.Input).ToArray();
+            if (changed.Length > 0) Remember(new UndoStep($"recall of \"{label}\"", changed));
             PanelHint = $"Recalled \"{label}\".";
         }
         else
         {
             PanelHint = "That preset is empty - press Store preset, then the preset, to fill it.";
+        }
+    }
+
+    /// <summary>Points the preview monitor at the clicked source, or at whatever the clicked destination carries.</summary>
+    private void UpdatePreview(List<RouterInput> inputs, List<RouterOutput> outputs)
+    {
+        switch (_previewKind)
+        {
+            case TileKind.Input:
+            {
+                var input = inputs[_previewIndex];
+                Preview.Show($"IN {_previewIndex + 1}  {input.Label}", input.NdiSource,
+                    "No NDI source assigned - right-click the source to assign one");
+                break;
+            }
+            case TileKind.Output:
+            {
+                var output = outputs[_previewIndex];
+                var caption = $"OUT {_previewIndex + 1}  {output.Label}";
+                if (output.Input is int i && i < inputs.Count)
+                    Preview.Show($"{caption}  ◀  IN {i + 1}  {inputs[i].Label}", inputs[i].NdiSource,
+                        $"IN {i + 1} has no NDI source assigned");
+                else
+                    Preview.Show($"{caption}  ◀  Clear", string.Empty, "Nothing routed to this destination");
+                break;
+            }
+            default:
+                Preview.Show("PREVIEW", string.Empty,
+                    Preview.IsAvailable ? "Click a source or destination to preview it" : "No preview: the NDI runtime is not loaded");
+                break;
         }
     }
 
@@ -453,7 +623,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
     [RelayCommand]
     private async Task ImportNdiRouterAsync()
     {
-        var path = await Dialogs.OpenFileAsync("Import NDI Router settings",
+        var path = await Dialogs.OpenFileAsync("Import NDI Tools router settings",
             Path.GetDirectoryName(NdiRouterImport.DefaultPath), Path.GetFileName(NdiRouterImport.DefaultPath));
         if (path is null) return;
 
@@ -464,14 +634,14 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         }
         catch (Exception ex)
         {
-            AddLog($"That file could not be read as NDI Router settings: {ex.Message}");
+            AddLog($"That file could not be read as NDI Tools router settings: {ex.Message}");
             return;
         }
 
         var message = $"Replace this router's layout with {imported.Inputs.Count} inputs, {imported.Outputs.Count} outputs " +
-                      $"and {imported.Presets.Count} presets from NDI Router, including its current routes?";
+                      $"and {imported.Presets.Count} presets from the NDI Tools router, including its current routes?";
         if (Process.GetProcessesByName("Application.NDI.Router").Length > 0)
-            message += "\n\nNDI Router is running on this computer. Its outputs have the same names as the ones being imported; " +
+            message += "\n\nThe NDI Tools router is running on this computer. Its outputs have the same names as the ones being imported; " +
                        "close it, or rename these outputs afterwards, so the two do not publish the same sources.";
 
         if (!await Dialogs.ConfirmAsync("Import", message)) return;
@@ -527,6 +697,7 @@ public sealed partial class MainViewModel : ObservableObject, IDisposable
         _saveTimer.Stop();
         Save();
         _disposed = true;
+        Preview.Dispose();
         _host.Dispose();
     }
 }

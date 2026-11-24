@@ -13,15 +13,20 @@ namespace NdiRouter.Tests;
 internal static class NdiTestInterop
 {
     private const string Library = "Processing.NDI.Lib";
+    private static readonly object Gate = new();
     private static bool _resolver;
 
+    /// <summary>Test classes run in parallel, and a second resolver for the assembly would throw.</summary>
     public static void Bind()
     {
-        if (_resolver) return;
-        var handle = NativeLibrary.Load(NdiNative.LoadedFrom!);
-        NativeLibrary.SetDllImportResolver(typeof(NdiTestInterop).Assembly,
-            (name, _, _) => name == Library ? handle : IntPtr.Zero);
-        _resolver = true;
+        lock (Gate)
+        {
+            if (_resolver) return;
+            var handle = NativeLibrary.Load(NdiNative.LoadedFrom!);
+            NativeLibrary.SetDllImportResolver(typeof(NdiTestInterop).Assembly,
+                (name, _, _) => name == Library ? handle : IntPtr.Zero);
+            _resolver = true;
+        }
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -83,22 +88,22 @@ internal static class NdiTestInterop
     public static extern void NDIlib_recv_free_video_v2(IntPtr instance, ref VideoFrame video);
 }
 
-/// <summary>An NDI source sending a flat picture of a given size until disposed.</summary>
+/// <summary>An NDI source sending a flat picture of a given size and colour until disposed.</summary>
 internal sealed class TestPattern : IDisposable
 {
     private readonly Thread _thread;
     private volatile bool _running = true;
 
-    public TestPattern(string name, int width, int height)
+    public TestPattern(string name, int width, int height, byte r = 0, byte g = 0, byte b = 0)
     {
         Name = name;
-        _thread = new Thread(() => Run(width, height)) { IsBackground = true };
+        _thread = new Thread(() => Run(width, height, r, g, b)) { IsBackground = true };
         _thread.Start();
     }
 
     public string Name { get; }
 
-    private void Run(int width, int height)
+    private void Run(int width, int height, byte r, byte g, byte b)
     {
         var namePtr = NdiNative.Utf8(Name);
         var settings = new NdiTestInterop.SendCreate { p_ndi_name = namePtr, clock_video = 1 };
@@ -106,6 +111,11 @@ internal sealed class TestPattern : IDisposable
         var buffer = Marshal.AllocHGlobal(width * height * 4);
         try
         {
+            var pixels = new byte[width * height * 4];
+            for (var at = 0; at < pixels.Length; at += 4)
+                (pixels[at], pixels[at + 1], pixels[at + 2], pixels[at + 3]) = (b, g, r, 255);
+            Marshal.Copy(pixels, 0, buffer, pixels.Length);
+
             var frame = new NdiTestInterop.VideoFrame
             {
                 xres = width,

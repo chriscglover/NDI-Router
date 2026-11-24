@@ -19,6 +19,9 @@ internal static class Palette
     /// <summary>A preset waiting to be stored to.</summary>
     public static readonly Color Armed = Color.Parse("#E8A82E");
 
+    /// <summary>A source picked for the next Take.</summary>
+    public static readonly Color Preselected = Color.Parse("#F2C94C");
+
     public static readonly IBrush Ok = new SolidColorBrush(Color.Parse("#4CAF50"));
     public static readonly IBrush Waiting = new SolidColorBrush(Color.Parse("#E8A82E"));
     public static readonly IBrush Off = new SolidColorBrush(Color.Parse("#777777"));
